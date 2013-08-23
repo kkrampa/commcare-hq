@@ -237,7 +237,7 @@ HQ_APPS = (
     'benin',
     'bihar',
     'dca',
-    'gsid',
+    'custom.apps.gsid',
     'hsph',
     'mvp',
     'mvp_apps',
@@ -841,6 +841,7 @@ DOMAIN_MODULE_MAP = {
     'mvp-mwandama': 'mvp',
     'mvp-sada': 'mvp',
     'psi-unicef': 'psi',
+    'gsid': 'custom.apps.gsid'
 }
 
 CASEXML_FORCE_DOMAIN_CHECK = True
