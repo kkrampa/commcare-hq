@@ -997,3 +997,37 @@ def clear_report_caches(request, domain):
     print "CLEARING CACHE FOR DOMAIN", domain
     print "ALL CACHES", cache.all()
     return HttpResponse("TESTING")
+
+@login_and_domain_required
+def reports_generator(request, domain, template="reports/reports_templates.html"):
+
+    user = request.couch_user
+    if not (request.couch_user.can_view_reports() or request.couch_user.get_viewable_reports()):
+        raise Http404
+
+    configs = ReportConfig.by_domain_and_owner(domain, user._id).all()
+    def _is_valid(rn):
+        # the _id check is for weird bugs we've seen in the wild that look like
+        # oddities in couch.
+        return hasattr(rn, "_id") and rn._id and (not hasattr(rn, 'report_slug') or rn.report_slug != 'admin_domains')
+
+    scheduled_reports = [rn for rn in ReportNotification.by_domain_and_owner(domain, user._id).all() if _is_valid(rn)]
+
+    context = dict(
+        couch_user=request.couch_user,
+        domain=domain,
+        configs=configs,
+        scheduled_reports=scheduled_reports,
+        report=dict(
+            title=_("My Saved Reports"),
+            show=user.can_view_reports() or user.get_viewable_reports(),
+            slug=None,
+            is_async=True,
+            section_name=ProjectReport.section_name,
+        ),
+    )
+
+    if request.couch_user:
+        util.set_report_announcements_for_user(request, user)
+
+    return render(request, template, context)

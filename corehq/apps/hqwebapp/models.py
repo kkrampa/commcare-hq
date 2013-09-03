@@ -217,7 +217,9 @@ class ProjectReportsTab(UITab):
         tools = [(_("Tools"), [
             {'title': 'My Saved Reports',
              'url': reverse('saved_reports', args=[self.domain]),
-             'icon': 'icon-tasks'}
+             'icon': 'icon-tasks'},
+            {'title': 'My Report Templates',
+             'url': reverse('reports_generator', args=[self.domain])}
         ])]
 
         project_reports = ProjectReportDispatcher.navigation_sections(
