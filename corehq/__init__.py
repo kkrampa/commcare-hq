@@ -1,5 +1,5 @@
 from corehq.apps.hqadmin.reports import AdminUserReport, AdminAppReport
-from corehq.apps.reports.standard import (custom_report, monitoring, inspect, export,
+from corehq.apps.reports.standard import (monitoring, inspect, export,
     deployments, sms, ivr)
 import corehq.apps.receiverwrapper.reports as receiverwrapper
 import phonelog.reports as phonelog
@@ -16,7 +16,7 @@ def REPORTS(project):
     reports = [
         (_("Custom Reports"), (
            crs_reports.HNBCMotherReport,
-           crs_reports.HNBCBabyReport,
+           crs_reports.HNBCInfantReport,
         )),
         (_("Monitor Workers"), (
             monitoring.WorkerActivityReport,
