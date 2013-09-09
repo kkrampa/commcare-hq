@@ -149,6 +149,18 @@ class SelectOpenCloseFilter(BaseSingleOptionFilter):
             ('closed', _("Only Closed")),
         ]
 
+class SelectPNCStatusFilter(BaseSingleOptionFilter):
+    slug = "PNC_status"
+    label = ugettext_noop("Status")
+    default_text = ugettext_noop("Complete PNC")
+
+    @property
+    def options(self):
+        return [
+            ('Incomplete PNC', _("Incomplete PNC")),
+            ('In progress PNC', _("In progress PNC")),
+        ]
+
 
 class SelectApplicationFilter(BaseSingleOptionFilter):
     slug = "app"

@@ -130,6 +130,16 @@ class BooleanField(ReportField):
         self.context[self.slug] = self.request.GET.get(self.slug, False)
         self.context['checked'] = self.request.GET.get(self.slug, False)
 
+class SelectPNCStatusField(ReportSelectField):
+    slug = "PNC_status"
+    name = ugettext_noop("Status")
+    cssId = "opened_closed"
+    cssClasses = "span3"
+    default_option = "Complete PNC"
+    options = [dict(val="Incomplete PNC", text=ugettext_noop("Incomplete PNC")),
+               dict(val="I progress PNC", text=ugettext_noop("In progress PNC"))]
+
+
 class GroupFieldMixin():
     slug = "group"
     name = ugettext_noop("Group")
@@ -610,7 +620,7 @@ class AsyncDrillableField(BaseReportFilter):
             'fdis': json.dumps(root_fdis),
             'hierarchy': self.full_hierarchy
         }
-        
+
 class DeviceLogTagField(ReportField):
     slug = "logtag"
     errors_only_slug = "errors_only"

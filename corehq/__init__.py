@@ -1,5 +1,5 @@
 from corehq.apps.hqadmin.reports import AdminUserReport, AdminAppReport
-from corehq.apps.reports.standard import (monitoring, inspect, export,
+from corehq.apps.reports.standard import (custom_report, monitoring, inspect, export,
     deployments, sms, ivr)
 import corehq.apps.receiverwrapper.reports as receiverwrapper
 import phonelog.reports as phonelog
@@ -13,6 +13,10 @@ from django.utils.translation import ugettext_noop as _
 
 def REPORTS(project):
     reports = [
+        (_("Custom Reports"), (
+            custom_report.MotherHNBCReport,
+            custom_report.InfantHNBCReport
+        )),
         (_("Monitor Workers"), (
             monitoring.WorkerActivityReport,
             monitoring.DailyFormStatsReport,

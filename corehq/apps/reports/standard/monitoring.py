@@ -349,7 +349,6 @@ class SubmissionsByFormReport(WorkerMonitoringReportTableBase, MultiFormDrilldow
         ).first()
         return data['value'] if data else 0
 
-
 class DailyFormStatsReport(WorkerMonitoringReportTableBase, CompletionOrSubmissionTimeMixin, DatespanMixin):
     slug = "daily_form_stats"
     name = ugettext_noop("Daily Form Activity")
