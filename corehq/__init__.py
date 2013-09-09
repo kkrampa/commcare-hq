@@ -7,6 +7,7 @@ from corehq.apps.reports.commtrack import psi_prototype
 from corehq.apps.reports.commtrack import standard as commtrack_reports
 from corehq.apps.reports.commtrack import maps as commtrack_maps
 import hashlib
+import corehq.apps.crs_reports.reports as crs_reports
 from dimagi.utils.modules import to_function
 
 from django.utils.translation import ugettext_noop as _
@@ -14,8 +15,8 @@ from django.utils.translation import ugettext_noop as _
 def REPORTS(project):
     reports = [
         (_("Custom Reports"), (
-            custom_report.MotherHNBCReport,
-            custom_report.InfantHNBCReport
+           crs_reports.HNBCMotherReport,
+           crs_reports.HNBCBabyReport,
         )),
         (_("Monitor Workers"), (
             monitoring.WorkerActivityReport,
