@@ -1,10 +1,9 @@
 from django.utils.translation import ugettext_noop
 
-from corehq.apps.reports.standard import ProjectReport, ProjectReportParametersMixin, DatespanMixin
-from corehq.apps.reports.fields import StrongFilterUsersField, ReportSelectField
+from corehq.apps.reports.standard import CustomProjectReport, DatespanMixin
+from corehq.apps.reports.fields import StrongFilterUsersField
 from corehq.apps.reports.datatables import DataTablesHeader, DataTablesColumn
-from corehq.apps.reports.generic import ElasticProjectInspectionReport
-from corehq.apps.reports.standard.monitoring import MultiFormDrilldownMixin
+from corehq.apps.reports.standard.inspect import CaseDisplay, CaseListReport
 
 import pytz
 from django.utils.translation import ugettext as _
@@ -12,9 +11,28 @@ from django.utils.translation import ugettext as _
 from dimagi.utils.decorators.memoized import memoized
 from dimagi.utils.timezones import utils as tz_utils
 
-class BaseHNBCReport(ElasticProjectInspectionReport, ProjectReport, ProjectReportParametersMixin, MultiFormDrilldownMixin, DatespanMixin):
-    fields = [
-              'corehq.apps.reports.fields.SelectPNCStatusField',
+
+class HNBCReportDisplay(CaseDisplay):
+
+    @property
+    def dob(self):
+        return self.parse_date(self.case['dob'])
+
+    @property
+    def visit_completion(self):
+        return ""
+
+    @property
+    def delivery(self):
+        return ""
+
+    @property
+    def pnc_status(self):
+        return ""
+
+
+class BaseHNBCReport(CustomProjectReport, DatespanMixin, CaseListReport):
+    fields = ['corehq.apps.reports.fields.SelectPNCStatusField',
               'corehq.apps.reports.standard.inspect.CaseSearchFilter',
               'corehq.apps.reports.fields.DatespanField']
     ajax_pagination = True
@@ -27,12 +45,28 @@ class BaseHNBCReport(ElasticProjectInspectionReport, ProjectReport, ProjectRepor
             DataTablesColumn(_("Case Type"), prop_name="type.exact"),
             DataTablesColumn(_("Case Name"), prop_name="name.exact"),
             DataTablesColumn(_("CHW Name"), prop_name="owner_display", sortable=False),
-            DataTablesColumn(_("DOB")),
-            DataTablesColumn(_("PNC Visit Competion")),
-            DataTablesColumn(_("Delivery")),
-            DataTablesColumn(_("Case/PNC Status"))
+            DataTablesColumn(_("DOB"), prop_name="dob"),
+            DataTablesColumn(_("PNC Visit Completion"), prop_name="visit_completion"),
+            DataTablesColumn(_("Delivery"), prop_name="delivery"),
+            DataTablesColumn(_("Case/PNC Status"), prop_name="pnc_status")
         )
         return headers
+
+    @property
+    def rows(self):
+        case_displays = (HNBCReportDisplay(self, self.get_case(case))
+                         for case in self.es_results['hits'].get('hits', []))
+
+        for disp in case_displays:
+            yield [
+                disp.case_type,
+                disp.case_link,
+                disp.owner_display,
+                disp.dob,
+                disp.visit_completion,
+                disp.delivery,
+                disp.pnc_status,
+            ]
 
     @property
     @memoized
@@ -53,6 +87,8 @@ class HNBCMotherReport(BaseHNBCReport):
     name = ugettext_noop('Mother HNBC Form')
     slug = 'hnbc_mother_report'
 
+    default_case_type = 'mother'
+
     @property
     def user_filter(self):
         return super(HNBCMotherReport, self).user_filter
@@ -61,6 +97,8 @@ class HNBCMotherReport(BaseHNBCReport):
 class HNBCInfantReport(BaseHNBCReport):
     name = ugettext_noop('Infant HNBC Form')
     slug = 'hnbc_infant_report'
+
+    default_case_type = 'baby'
 
     @property
     def user_filter(self):

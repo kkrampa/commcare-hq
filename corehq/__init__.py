@@ -7,17 +7,12 @@ from corehq.apps.reports.commtrack import psi_prototype
 from corehq.apps.reports.commtrack import standard as commtrack_reports
 from corehq.apps.reports.commtrack import maps as commtrack_maps
 import hashlib
-import corehq.apps.crs_reports.reports as crs_reports
 from dimagi.utils.modules import to_function
 
 from django.utils.translation import ugettext_noop as _
 
 def REPORTS(project):
     reports = [
-        (_("Custom Reports"), (
-           crs_reports.HNBCMotherReport,
-           crs_reports.HNBCInfantReport,
-        )),
         (_("Monitor Workers"), (
             monitoring.WorkerActivityReport,
             monitoring.DailyFormStatsReport,
@@ -181,6 +176,15 @@ ADMIN_REPORTS = (
         AdminDomainStatsReport,
         AdminUserReport,
         AdminAppReport,
+    )),
+)
+
+from corehq.apps.crs_reports.reports import HNBCMotherReport, HNBCInfantReport
+
+CUSTOM_REPORTS = (
+    (_('Custom Reports'), (
+       HNBCMotherReport,
+       HNBCInfantReport,
     )),
 )
 
