@@ -139,6 +139,22 @@ class SelectPNCStatusField(ReportSelectField):
     options = [dict(val="Incomplete PNC", text=ugettext_noop("Incomplete PNC")),
                dict(val="I progress PNC", text=ugettext_noop("In progress PNC"))]
 
+class SelectBlockField(ReportSelectField):
+    slug = "block"
+    name = ugettext_noop("Block")
+    cssId = "opened_closed"
+    cssClasses = "span3"
+    default_option = "Select Block"
+    options = []
+
+class SelectSubCenterField(ReportSelectField):
+    slug = "sub_center"
+    name = ugettext_noop("Sub Center")
+    cssId = "opened_closed"
+    cssClasses = "span3"
+    default_option = "Select Sub Center"
+    options = []
+
 
 class GroupFieldMixin():
     slug = "group"
@@ -495,6 +511,15 @@ class DatespanField(ReportField):
             self.datespan.enddate = self.request.datespan.enddate
         self.context['timezone'] = self.timezone.zone
         self.context['datespan'] = self.datespan
+
+
+class SelectASHAField(SelectCaseOwnerField):
+    name = ugettext_noop("ASHA")
+    default_option = ugettext_noop("Type ASHA name")
+
+    def update_params(self):
+        case_sharing_groups = Group.get_case_sharing_groups(self.domain)
+        self.context["groups"] = [dict(group_id=group._id, name=group.name) for group in case_sharing_groups]
 
 class AsyncLocationField(ReportField):
     name = ugettext_noop("Location")

@@ -32,7 +32,10 @@ class HNBCReportDisplay(CaseDisplay):
 
 
 class BaseHNBCReport(CustomProjectReport, DatespanMixin, CaseListReport):
-    fields = ['corehq.apps.reports.fields.SelectPNCStatusField',
+    fields = ['corehq.apps.reports.fields.SelectBlockField',
+              'corehq.apps.reports.fields.SelectSubCenterField',
+              'corehq.apps.reports.fields.SelectASHAField',
+              'corehq.apps.reports.fields.SelectPNCStatusField',
               'corehq.apps.reports.standard.inspect.CaseSearchFilter',
               'corehq.apps.reports.fields.DatespanField']
     ajax_pagination = True
