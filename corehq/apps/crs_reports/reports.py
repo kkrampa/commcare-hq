@@ -18,26 +18,27 @@ class HNBCReportDisplay(CaseDisplay):
 
     @property
     def dob(self):
-        return "" #self.parse_date(self.case['dob'])
+        return "" #self.case['dob']
 
     @property
     def visit_completion(self):
-        return "" #self.parse_date(self.case['visit_completion'])
+        return "" #self.case['visit_completion']
 
     @property
     def delivery(self):
-        return "" #self.parse_date(self.case['delivery'])
+        return "" #self.case['delivery']
 
     @property
     def pnc_status(self):
-        return "" #self.parse_date(self.case['pnc_status'])
+        return "" #self.case['pnc_status']
 
     @property
     def case_link(self):
         case_id, case_name = self.case['_id'], self.case['name']
         try:
             return html.mark_safe("<a class='ajax_dialog' href='%s'>%s</a>" % (
-                html.escape(reverse('case_details_report', args=[self.report.domain, case_id])),
+                html.escape(reverse('case_details_report', args=[self.report.domain, case_id,
+                            self.report.module_name, self.report.report_template_name, self.report.slug])),
                 html.escape(case_name),
             ))
         except NoReverseMatch:
@@ -56,6 +57,8 @@ class BaseHNBCReport(CustomProjectReport, DatespanMixin, CaseListReport):
     ajax_pagination = True
     filter_users_field_class = StrongFilterUsersField
     include_inactive = True
+    module_name = 'crs_reports'
+    report_template_name = None
 
     @property
     def headers(self):
@@ -86,17 +89,17 @@ class BaseHNBCReport(CustomProjectReport, DatespanMixin, CaseListReport):
                 disp.pnc_status,
             ]
 
-    # @property
-    # def case_filter(self):
-    #     filters = [{
-    #         'range': {
-    #             'opened_on': {
-    #                 "from": self.datespan.startdate_param_utc,
-    #                 "to": self.datespan.enddate_param_utc
-    #             }
-    #         }
-    #     }]
-    #     return filters
+    @property
+    def case_filter(self):
+        filters = [{
+            'range': {
+                'opened_on': {
+                    "from": self.datespan.startdate_param_utc,
+                    "to": self.datespan.enddate_param_utc
+                }
+            }
+        }]
+        return {'and': filters} if filters else {}
 
     @property
     @memoized
@@ -117,7 +120,7 @@ class HNBCMotherReport(BaseHNBCReport):
 
     name = ugettext_noop('Mother HNBC Form')
     slug = 'hnbc_mother_report'
-
+    report_template_name = 'mothers_form_reports_template'
     default_case_type = 'mother'
 
     @property
@@ -128,7 +131,7 @@ class HNBCMotherReport(BaseHNBCReport):
 class HNBCInfantReport(BaseHNBCReport):
     name = ugettext_noop('Infant HNBC Form')
     slug = 'hnbc_infant_report'
-
+    report_template_name = 'baby_form_reports_template'
     default_case_type = 'baby'
 
     @property
