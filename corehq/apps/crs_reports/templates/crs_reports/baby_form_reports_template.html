@@ -37,7 +37,7 @@
                 <td>Mother&rsquo;s name: {{ case.mother_name }}</td>
                 <td>Husband&rsquo;s name: {{ case.fathers_name }}</td>
                 <td>Villages name: {{ case.hamlet_name }}</td>
-                <td>Name of sub-centre:</td>
+                <td>Name of sub-centre: {{ sub_center }}</td>
                 <td>District:</td>
             </tr>
             <tr>
@@ -77,13 +77,9 @@
             {% for question in questions %}
                 <tr>
                     <td colspan="2" rowspan="1">{{question.label}}</td>
-                    <td colspan="1">&nbsp;</td>
-                    <td colspan="1">&nbsp;</td>
-                    <td colspan="1">&nbsp;</td>
-                    <td colspan="1">&nbsp;</td>
-                    <td colspan="1">&nbsp;</td>
-                    <td colspan="1">&nbsp;</td>
-                    <td colspan="1">&nbsp;</td>
+                    {% for answer in question.answers %}
+                        <td colspan="1">{{ answer }}</td>
+                    {% endfor %}
                     <td colspan="2" rowspan="1">&nbsp;</td>
                     <td colspan="2" rowspan="1">&nbsp;</td>
                 </tr>
@@ -97,8 +93,8 @@
                 <td colspan="11" rowspan="1">NOTE:</td>
             </tr>
             <tr>
-                <td colspan="3" rowspan="1">Name of ASHA: {{ username }}</td>
-                <td colspan="3" rowspan="1">Name of Village:</td>
+                <td colspan="3" rowspan="1">Name of ASHA: {{ user.full_name }}</td>
+                <td colspan="3" rowspan="1">Name of Village: {{ user.user_data.village }}</td>
                 <td colspan="5" rowspan="1">Name of CHC/PHC:</td>
             </tr>
             <tr>

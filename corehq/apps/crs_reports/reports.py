@@ -17,7 +17,7 @@ from dimagi.utils.timezones import utils as tz_utils
 def visit_completion_counter(case):
     counter = 0
     for i in range(1, 8):
-        if "pp_visit_%s" % i in case and case["pp_visit_%s" % i].upper() == "YES":
+        if "pp_visit_%s" % i in case and case["case_pp_%s_done" % i].upper() == "YES":
             counter += 1
     return counter
 
@@ -44,7 +44,10 @@ class HNBCReportDisplay(CaseDisplay):
 
     @property
     def pnc_status(self):
-        return "" #self.case['pnc_status']
+        if visit_completion_counter(self.case) == 7:
+            return "On Time"
+        else:
+            return "Late"
 
     @property
     def case_link(self):
@@ -102,10 +105,10 @@ class BaseHNBCReport(CustomProjectReport, DatespanMixin, CaseListReport):
                 disp.pnc_status,
             ]
 
-    # @property
-    # def case_filter(self):
-    #     filters = [{'term': {'pp_case_filter': "1"}}]
-    #     return {'and': filters} if filters else {}
+    @property
+    def case_filter(self):
+        filters = [{'term': {'pp_case_filter': "1"}}]
+        return {'and': filters} if filters else {}
 
     @property
     @memoized
