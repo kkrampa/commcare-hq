@@ -14,19 +14,33 @@ from dimagi.utils.decorators.memoized import memoized
 from dimagi.utils.timezones import utils as tz_utils
 
 
+def visit_completion_counter(case):
+    counter = 0
+    for i in range(1, 8):
+        if "pp_visit_%s" % i in case and case["pp_visit_%s" % i].upper() == "YES":
+            counter += 1
+    return counter
+
+
 class HNBCReportDisplay(CaseDisplay):
 
     @property
     def dob(self):
-        return "" #self.case['dob']
+        if 'date_birth' not in self.case:
+            return '---'
+        else:
+            return self.case['date_birth']
 
     @property
     def visit_completion(self):
-        return "" #self.case['visit_completion']
+        return "%s/7" % visit_completion_counter(self.case)
 
     @property
     def delivery(self):
-        return "" #self.case['delivery']
+        if 'place_birth' not in self.case:
+            return '---'
+        else:
+            return self.case['place_birth']
 
     @property
     def pnc_status(self):
@@ -51,8 +65,7 @@ class BaseHNBCReport(CustomProjectReport, DatespanMixin, CaseListReport):
               'corehq.apps.reports.fields.SelectSubCenterField',
               'corehq.apps.reports.fields.SelectASHAField',
               'corehq.apps.reports.fields.SelectPNCStatusField',
-              'corehq.apps.reports.standard.inspect.CaseSearchFilter',
-              'corehq.apps.reports.fields.DatespanField']
+              'corehq.apps.reports.standard.inspect.CaseSearchFilter']
 
     ajax_pagination = True
     filter_users_field_class = StrongFilterUsersField
@@ -89,17 +102,10 @@ class BaseHNBCReport(CustomProjectReport, DatespanMixin, CaseListReport):
                 disp.pnc_status,
             ]
 
-    @property
-    def case_filter(self):
-        filters = [{
-            'range': {
-                'opened_on': {
-                    "from": self.datespan.startdate_param_utc,
-                    "to": self.datespan.enddate_param_utc
-                }
-            }
-        }]
-        return {'and': filters} if filters else {}
+    # @property
+    # def case_filter(self):
+    #     filters = [{'term': {'pp_case_filter': "1"}}]
+    #     return {'and': filters} if filters else {}
 
     @property
     @memoized
@@ -121,7 +127,7 @@ class HNBCMotherReport(BaseHNBCReport):
     name = ugettext_noop('Mother HNBC Form')
     slug = 'hnbc_mother_report'
     report_template_name = 'mothers_form_reports_template'
-    default_case_type = 'mother'
+    default_case_type = 'pregnant_mother'
 
     @property
     def user_filter(self):

@@ -23,18 +23,20 @@ def case_details_report(request, domain, case_id, module_name, report_template, 
         case = None
 
     try:
-        owner_name = CommCareUser.get_by_user_id(case.owner_id, domain).raw_username
+        owner_name = CommCareUser.get_by_user_id(case.owner_id, domain).full_name
     except Exception:
-        try:
-            owning_group = Group.get(case.owner_id)
-            owner_name = owning_group.display_name if owning_group.domain == domain else ''
-        except Exception:
-            owner_name = None
+        owner_name = None
 
     try:
-        username = CommCareUser.get_by_user_id(case.user_id, domain).raw_username
+        owning_group = Group.get(case.owner_id)
+        sub_center = owning_group.display_name if owning_group.domain == domain else ''
     except Exception:
-        username = None
+        sub_center = None
+
+    try:
+        user = CommCareUser.get_by_user_id(case.user_id, domain)
+    except Exception:
+        user = None
 
     questions = get_questions_with_answers(case.get_forms(), domain, case)
 
@@ -47,7 +49,8 @@ def case_details_report(request, domain, case_id, module_name, report_template, 
             is_async=False,
         ),
         "owner_name": owner_name,
-        "username": username,
+        "user": user,
+        "sub_center": sub_center,
         "case": case,
         "questions": questions
     })
@@ -55,12 +58,26 @@ def case_details_report(request, domain, case_id, module_name, report_template, 
 
 def get_questions_with_answers(forms, domain, case):
     questions_with_answers = []
+    needed_forms = []
     app = get_app(domain, getattr(forms[0], "app_id", None))
     for form in forms:
-        questions = app.get_questions(form.xmlns)
-        for question in questions:
-            question_with_answers = {'question': question['label'],
-                                     'answers': []}
+        if 'current_count' in form.get_form:
+            needed_forms.append(form)
+
+    for question in app.get_questions(needed_forms[0].xmlns):
+        if question['tag'] != "hidden":
             answer_field = re.search('.*/(.*)', question['value']).group(1)
+            questions_with_answers.append({"label": question["label"],
+                                           "answer_field": answer_field})
+
+    for question in questions_with_answers:
+        question["answers"] = ["", "", "", "", "", "", ""]
+        i = 0
+        for form in needed_forms:
+            if question["answer_field"] in form.get_form:
+                question['answers'][i] = form.get_form[question["answer_field"]]
+            else:
+                question['answers'][i] = "---"
+            i += 1
     return questions_with_answers
 
