@@ -218,3 +218,29 @@ class OpenLMISEndpoint(object):
     @classmethod
     def from_config(cls, config):
         return cls(config.url, config.username, config.password)
+
+
+class Requisition(object):
+
+    def __init__(self, agent_code, program_id, report_type, products, period_id=None):
+        self.agent_code = agent_code
+        self.program_id = program_id
+        self.period_id = period_id
+        self.report_type = report_type
+        self.products = products
+
+    @classmethod
+    def from_json(cls, json_rep):
+        product_list = json_rep['products']
+        if not product_list:
+            return None
+
+        agent_code = json_rep['agentCode']
+        program_id = json_rep['programId']
+        period_id = getattr(json_rep, 'periodId', None)
+        report_type = json_rep['reportType']
+        products = []
+        for p in product_list:
+            products.append(Product.from_json(p))
+
+        return cls(agent_code=agent_code, program_id=program_id, report_type=report_type, products=products, period_id=period_id)
