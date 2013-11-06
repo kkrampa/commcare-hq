@@ -249,6 +249,41 @@ class Requisition(object):
         report_type = json_rep['reportType']
         products = []
         for p in product_list:
-            products.append(Product.from_json(p))
+            products.append(RequisitionProduct.from_json(p))
 
         return cls(agent_code=agent_code, program_id=program_id, report_type=report_type, products=products, period_id=period_id)
+
+
+class RequisitionProduct(Product):
+
+    def __init__(self, code, name=None, description=None, unit=None, category=None, beginning_balance=None,
+                 quantity_received=None, quantity_dispensed=None, losses_and_adjustments=None, new_patient_count=None,
+                 stock_on_hand=None, stock_out_days=None, quantity_requested=None, reason_for_requested_quantity=None, remarks=None):
+        self.beginning_balance = beginning_balance
+        self.quantity_received = quantity_received
+        self.quantity_dispensed = quantity_dispensed
+        self.losses_and_adjustments = losses_and_adjustments
+        self.new_patient_count = new_patient_count
+        self.stock_on_hand = stock_on_hand
+        self.stock_out_days = stock_out_days
+        self.quantity_requested = quantity_requested
+        self.reason_for_requested_quantity = reason_for_requested_quantity
+        self.remarks = remarks
+        super(RequisitionProduct, self).__init__(code, name, description, unit, category)
+
+    @classmethod
+    def from_json(cls, json_rep):
+        code = json_rep['productCode']
+        beginning_balance = getattr(json_rep, 'beginningBalance', None)
+        quantity_received = getattr(json_rep, 'quantityReceived', None)
+        quantity_dispensed = getattr(json_rep, 'quantityDispensed', None)
+        losses_and_adjustments = getattr(json_rep, 'lossesAndAdjustments', None)
+        new_patient_count = getattr(json_rep, 'newPatientCount', None)
+        stock_on_hand = getattr(json_rep, 'stockOnHand', None)
+        stock_out_days = getattr(json_rep, 'stockOutDays', None)
+        quantity_requested = getattr(json_rep, 'quantityRequested', None)
+        reason_for_requested_quantity = getattr(json_rep, 'reasonForRequestedQuantity', None)
+        remarks = getattr(json_rep, 'remarks', None)
+        return cls(code=code, beginning_balance=beginning_balance, quantity_received=quantity_received, quantity_dispensed=quantity_dispensed,
+                   losses_and_adjustments=losses_and_adjustments, new_patient_count=new_patient_count, stock_on_hand=stock_on_hand, stock_out_days=stock_out_days,
+                   quantity_requested=quantity_requested, reason_for_requested_quantity=reason_for_requested_quantity, remarks=remarks)
