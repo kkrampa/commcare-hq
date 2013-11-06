@@ -151,6 +151,7 @@ class OpenLMISEndpoint(object):
         self.create_virtual_facility_url = self._urlcombine(self._rest_uri, '/agent.json')
         self.update_virtual_facility_base_url = self._urlcombine(self._rest_uri, '/agent')
         self.program_product_url = self._urlcombine(self._rest_uri, '/programProducts.json')
+        self.submit_requisition_url = self._urlcombine(self._rest_uri, '/submitRequisition') #todo waiting for update document, added some url for testing
 
     def _urlcombine(self, base, target):
         return '{base}{target}'.format(base=base, target=target)
@@ -212,6 +213,13 @@ class OpenLMISEndpoint(object):
                                 data=json.dumps(facility_data),
                                 headers={'content-type': 'application/json'},
                                 auth=self._auth())
+        return self._response(response)
+
+    def submit_requisition(self, requisition_data):
+        response = requests.post(self.submit_requisition_url,
+                                 data=json.dumps(requisition_data),
+                                 headers={'content-type': 'application/json'},
+                                 auth=self._auth())
         return self._response(response)
 
 
