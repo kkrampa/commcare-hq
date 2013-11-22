@@ -4,7 +4,7 @@ from corehq.apps.reports.standard.inspect import CaseDisplay
 from casexml.apps.case.models import CommCareCase
 from django.utils.translation import ugettext as _
 import logging
-from custom.bihar.calculations.utils.xmlns import BP, NEW, MTB_ABORT, DELIVERY
+from custom.bihar.calculations.utils.xmlns import BP, NEW, MTB_ABORT, DELIVERY, REGISTRATION
 from couchdbkit.exceptions import ResourceNotFound
 from corehq.apps.users.models import CommCareUser
 
@@ -89,6 +89,9 @@ class MCHMotherDisplay(MCHDisplay):
         case = CommCareCase.get(case_dict["_id"])
         forms = case.get_forms()
 
+        jsy_beneficiary = None
+        jsy_money = None
+
         for form in forms:
             form_dict = form.get_form
             form_xmlns = form_dict["@xmlns"]
@@ -96,7 +99,6 @@ class MCHMotherDisplay(MCHDisplay):
             if NEW in form_xmlns:
                 setattr(self, "_caste", get_property(form_dict, "caste"))
             elif DELIVERY in form_xmlns:
-                setattr(self, "_jsy_beneficiary", get_property(form_dict, "jsy_beneficiary"))
                 setattr(self, "_home_sba_assist", get_property(form_dict, "home_sba_assist"))
                 setattr(self, "_delivery_nature", get_property(form_dict, "delivery_nature"))
                 setattr(self, "_discharge_date", get_property(form_dict, "discharge_date"))
@@ -104,6 +106,7 @@ class MCHMotherDisplay(MCHDisplay):
                 setattr(self, "_delivery_complications", get_property(form_dict, "delivery_complications"))
                 setattr(self, "_family_planning_type", get_property(form_dict, "family_planing_type"))
                 setattr(self, "_all_pnc_on_time", get_property(form_dict, "all_pnc_on_time"))
+                jsy_money = get_property(form_dict, "jsy_money")
                 children_count = int(get_property(form_dict, "cast_num_children", 0))
                 child_list = []
                 if children_count == 1 and "child_info" in form_dict:
@@ -120,6 +123,8 @@ class MCHMotherDisplay(MCHDisplay):
                     if case_child:
                         setattr(self, "_case_name_%s" % (idx+1), get_property(case_child, "name"))
                         setattr(self, " _gender_%s" % (idx+1), get_property(case_child, "gender"))
+            elif REGISTRATION in form_xmlns:
+                jsy_beneficiary = get_property(form_dict, "jsy_beneficiary")
 
             elif BP in form_xmlns:
                 if "bp1" in form_dict:
@@ -138,6 +143,11 @@ class MCHMotherDisplay(MCHDisplay):
                 setattr(self, "_rti_sti", get_property(form_dict, "rti_sti"))
             elif MTB_ABORT in form_xmlns:
                 setattr(self, "_abortion_type", get_property(form_dict, "abortion_type"))
+
+        if jsy_beneficiary is not None and jsy_beneficiary != EMPTY_FIELD:
+            setattr(self, "_jsy_beneficiary", jsy_beneficiary)
+        else:
+            setattr(self, "_jsy_beneficiary", jsy_money)
 
         super(MCHMotherDisplay, self).__init__(report, case_dict)
 
