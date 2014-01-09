@@ -37,9 +37,9 @@ def render_to_pdf(request, domain, case_id, report_slug):
 def get_questions_with_answers(forms, domain, report_slug):
     sections = QuestionTemplateDispatcher().get_question_templates(domain, report_slug)
     for section in sections:
-        count = 7
+        count = 6
         if section['questions'][0]['case_property'] == 'section_d':
-            count = 8
+            count = 7
         for question in section['questions']:
             question['answers'] = []
         for form in forms:
