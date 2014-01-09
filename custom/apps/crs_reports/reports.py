@@ -1,4 +1,3 @@
-from couchdbkit import ResourceNotFound
 from django.utils.translation import ugettext_noop
 from django.utils import html
 from casexml.apps.case.models import CommCareCase
@@ -15,15 +14,26 @@ from corehq.pillows.base import restore_property_dict
 from dimagi.utils.decorators.memoized import memoized
 from dimagi.utils.timezones import utils as tz_utils
 
+YES_ANSWER = u"\u0939\u093e\u0901"
+
 
 def visit_completion_counter(case):
-    counter = 0
+    mother_counter = 0
+    baby_counter = 0
+
+    case = CommCareCase.get(case['_id'])
+    baby_case = [c for c in case.get_subcases().all() if c.type == 'baby']
+
+    if baby_case:
+        for i in range(1, 8):
+            if "bb_pp_%s_done" % i in baby_case[0] and baby_case[0]["bb_pp_%s_done" % i] == YES_ANSWER:
+                baby_counter += 1
 
     for i in range(1, 8):
-        if "case_pp_%s_done" % i in case and case["case_pp_%s_done" % i].upper() == "YES":
-            counter += 1
+        if "pp_%s_done" % i in case and case["pp_%s_done" % i] == YES_ANSWER:
+            mother_counter += 1
 
-    return counter
+    return max([mother_counter, baby_counter])
 
 
 class HNBCReportDisplay(CaseDisplay):
