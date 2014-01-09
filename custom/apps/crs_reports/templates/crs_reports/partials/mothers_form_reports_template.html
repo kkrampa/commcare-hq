@@ -19,6 +19,16 @@
 </style>
 
 <div class="hq-generic-report">
+    <table style="width: 100%; border: 1px solid;"  cellpadding="0" cellspacing="0">
+        <tbody>
+            <tr>
+                <td style="border: 1px solid;">{% trans "Mother's name:" %} <strong>{{ case.name }}</strong></td>
+                <td style="border: 1px solid;">{% trans "Husband's name:" %} <strong>{{ case.husband_name }}</strong></td>
+                <td style="border: 1px solid;">{% trans "Villages name:" %} <strong>{{ case.hamlet_name }}</strong></td>
+                <td style="border: 1px solid;">{% trans "Date of Birth:" %} <strong>{{ case.date_birth }}</strong></td>
+            </tr>
+        </tbody>
+    </table>
     <br>
     {% for section in sections %}
         <table style="width: 100%" cellpadding="0" cellspacing="0">
@@ -26,11 +36,13 @@
             <tbody>
                 {% if forloop.counter == 3 %}
                     <tr>
-                        <td style="border: 1px solid;" colspan="11">
-                            {% blocktrans %}
-                                D. Check now for the following signs of sepsis: If sign is present mention - Yes, if it is absent,
-                                mention - No Record the observations on Day 1 from the first examination of newborn form.
-                            {% endblocktrans %}
+                        <td style="border: 1px solid;" colspan="8">
+                            <strong>
+                                {% blocktrans %}
+                                    D. Check now for the following signs of sepsis: If sign is present mention - Yes, if it is absent,
+                                    mention - No Record the observations on Day 1 from the first examination of newborn form.
+                                {% endblocktrans %}
+                            </strong>
                         </td>
                     </tr>
                     <tr>
@@ -42,8 +54,6 @@
                         <td style="border: 1px solid; text-align: center;">{% trans "Day 14" %}</td>
                         <td style="border: 1px solid; text-align: center;">{% trans "Day 21" %}</td>
                         <td style="border: 1px solid; text-align: center;">{% trans "Day 28" %}</td>
-                        <td style="border: 1px solid; text-align: center;">{% trans "Action by the Asha" %}</td>
-                        <td style="border: 1px solid; text-align: center;" colspan="2">{% trans "Action Taken" %}</td>
                     </tr>
                 {% else %}
                     <tr>
@@ -54,23 +64,21 @@
                         <td style="border: 1px solid; text-align: center;">{% trans "Day 21" %}</td>
                         <td style="border: 1px solid; text-align: center;">{% trans "Day 28" %}</td>
                         <td style="border: 1px solid; text-align: center;">{% trans "Day 42" %}</td>
-                        <td style="border: 1px solid; text-align: center;">{% trans "Action by the Asha" %}</td>
-                        <td style="border: 1px solid; text-align: center;" colspan="2">{% trans "Supervisor Check" %}</td>
                     </tr>
                 {% endif %}
                 {% for question in section.questions %}
                     {% if question.case_property != "section_d" %}
                         <tr>
-                            <td style="border: 1px solid;">{{question.question}}</td>
+                            <td style="border: 1px solid;">
+                                {% if question.case_property == "section_a" or question.case_property == "section_b" or question.case_property == "section_c" %}
+                                    <strong>{{question.question}}</strong>
+                                {% else %}
+                                    {{question.question}}
+                                {% endif %}
+                            </td>
                             {% for answer in question.answers %}
                                 <td style="border: 1px solid; text-align: center;">{{ answer }}</td>
                             {% endfor %}
-                            {% if forloop.counter0 == 0%}
-                                <td style="border: 1px solid; text-align: center;" colspan="2">{% trans "Action Taken" %}</td>
-                            {% else  %}
-                                <td style="border: 1px solid;">&nbsp;</td>
-                                <td style="border: 1px solid;">&nbsp;</td>
-                            {% endif %}
                         </tr>
                     {% endif %}
                 {% endfor %}
@@ -80,8 +88,8 @@
     {% endfor %}
     <span><strong>{% trans "Supervisor's note: " %}</strong>{% trans "Incomplete work/incorrect work/incorrect record/ "%}</span>
     <div style="border: 1px solid; padding: 5px;">
-        <span>{% trans "Name of ASHA:"%}</span><span style="margin-right: 5em;"> {{ user.full_name }} </span><span>{% trans "Date:" %} ___________________</span><br><br>
-        <span>{% trans "Name of Trainer/Facilitator" %} _______________________________________________</span>
+        <span>{% trans "Name of ASHA:"%}</span><span style="margin-right: 5em;"> <strong>{{ user.full_name }} </strong></span><span>{% trans "Date:" %} ___________________</span><br><br>
+        <span>{% trans "Name of Supervisor/Facilitator" %} _______________________________________________</span>
     </div>
 
 </div>
