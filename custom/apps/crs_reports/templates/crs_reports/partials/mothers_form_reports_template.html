@@ -77,7 +77,11 @@
                                 {% endif %}
                             </td>
                             {% for answer in question.answers %}
-                                <td style="border: 1px solid; text-align: center;">{{ answer }}</td>
+                                {% if forloop.counter0 == 0 and question.first_blackout %}
+                                    <td bgcolor="#afafaf" style="border: 1px solid; text-align: center;"></td>
+                                {% else %}
+                                    <td style="border: 1px solid; text-align: center;">{{ answer }}</td>
+                                {% endif %}
                             {% endfor %}
                         </tr>
                     {% endif %}

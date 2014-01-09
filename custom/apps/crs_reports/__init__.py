@@ -87,15 +87,19 @@ QUESTION_TEMPLATES = (
             },
             {'case_property': 'abdomen_vomit',
             'question': _('Distant abdomen or mother says "baby vomits often"?'),
+            'first_blackout': True
             },
             {'case_property': 'cold',
             'question': _('Mother says "baby is cold to touch" or baby\'s temperature?'),
+            'first_blackout': True
             },
             {'case_property': 'chest',
             'question': _('>99 degree F (37.2 degree C) Chest in drawing?'),
+            'first_blackout': True
             },
             {'case_property': 'pus',
             'question': _('Pus on umbilicus?'),
+            'first_blackout': True
             }]
         }
     ]),
