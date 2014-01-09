@@ -64,7 +64,7 @@ class HNBCReportDisplay(CaseDisplay):
 
     @property
     def case_link(self):
-        case_id, case_name = self.case['_id'], self.case['name']
+        case_id, case_name = self.case['_id'], self.case['mother_name']
         try:
             return html.mark_safe("<a class='ajax_dialog' href='%s'>%s</a>" % (
                 html.escape(reverse('crs_details_report', args=[self.report.domain, case_id, self.report.slug])),
@@ -75,11 +75,8 @@ class HNBCReportDisplay(CaseDisplay):
 
     @property
     def baby_name(self):
-        case = CommCareCase.get(self.case['_id'])
-
-        baby_case = [c for c in case.get_subcases().all() if c.type == 'baby']
-        if baby_case:
-            return baby_case[0].name
+        if "baby_name" in self.case:
+            return self.case["baby_name"]
         else:
             return '---'
 
@@ -94,8 +91,7 @@ class BaseHNBCReport(CustomProjectReport, CaseListReport):
 
     fields = ['custom.apps.crs_reports.fields.SelectBlockField',
               'custom.apps.crs_reports.fields.SelectSubCenterField', # Todo: Currently there is no data about it in case
-              'custom.apps.crs_reports.fields.SelectASHAField',
-              'custom.apps.crs_reports.fields.SelectPNCStatusField']
+              'custom.apps.crs_reports.fields.SelectASHAField']
 
     ajax_pagination = True
     include_inactive = True
@@ -119,8 +115,7 @@ class BaseHNBCReport(CustomProjectReport, CaseListReport):
             DataTablesColumn(_("CHW Name"), prop_name="owner_display", sortable=False),
             DataTablesColumn(_("Date of Delivery"),  prop_name="date_birth"),
             DataTablesColumn(_("PNC Visit Completion"), sortable=False),
-            DataTablesColumn(_("Delivery"), prop_name="place_birth"),
-            DataTablesColumn(_("Case/PNC Status"), sortable=False)
+            DataTablesColumn(_("Delivery"), prop_name="place_birth")
         )
         return headers
 
@@ -137,7 +132,6 @@ class BaseHNBCReport(CustomProjectReport, CaseListReport):
                 disp.dob,
                 disp.visit_completion,
                 disp.delivery,
-                disp.pnc_status,
             ]
 
     @property
