@@ -44,6 +44,8 @@ def get_questions_with_answers(forms, domain, report_slug):
             question['answers'] = []
         for form in forms:
             form_dict = form.form
+            if 'baby_alive_group' in form_dict:
+                form_dict = form_dict['baby_alive_group']
             for question in section['questions']:
                 if question['case_property'] in form_dict:
                     question['answers'].append(form_dict[question['case_property']])

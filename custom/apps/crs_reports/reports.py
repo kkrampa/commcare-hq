@@ -172,20 +172,6 @@ class HBNCMotherReport(BaseHNBCReport):
         filters = BaseHNBCReport.base_filters(self)
         filters.append({'term': {'pp_case_filter.#value': "1"}})
 
-        status = self.request_params.get('PNC_status', '')
-
-        or_stmt = []
-
-        if status:
-            if status == 'On Time':
-                for i in range(1, 8):
-                    filters.append({'term': {'case_pp_%s_done.#value' % i: 'yes'}})
-            else:
-                for i in range(1, 8):
-                    or_stmt.append({"not": {'term': {'case_pp_%s_done.#value' % i: 'yes'}}})
-                or_stmt = {'or': or_stmt}
-                filters.append(or_stmt)
-
         return {'and': filters} if filters else {}
 
     @property
