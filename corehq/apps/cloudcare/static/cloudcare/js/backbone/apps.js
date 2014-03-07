@@ -28,7 +28,7 @@ cloudCare.AppNavigation = Backbone.Router.extend({
 
 
 cloudCare.AppSummary = Backbone.Model.extend({
-    idAttribute: "_id"
+    idAttribute: "copy_of"
 });
 
 cloudCare.AppSummaryView = Selectable.extend({
@@ -102,7 +102,7 @@ cloudCare.AppListView = Backbone.View.extend({
 });
 
 cloudCare.App = LocalizableModel.extend({
-    idAttribute: "_id",
+    idAttribute: "copy_of",
     initialize: function () {
         var self = this;
         self.constructor.__super__.initialize.apply(self, [self.options]);
@@ -618,7 +618,7 @@ cloudCare.AppMainView = Backbone.View.extend({
         });
 
         cloudCare.dispatch.on("app:selected", function (app) {
-            self.navigate("view/" + app.model.id);
+            self.navigate("view/" + app.model.attributes.copy_of);
             self.selectApp(app.model.id);
         });
         cloudCare.dispatch.on("app:deselected", function (app) {

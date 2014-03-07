@@ -19,7 +19,7 @@ from django.shortcuts import render
 from corehq.apps.app_manager.models import Application, ApplicationBase
 import json
 from corehq.apps.cloudcare.api import look_up_app_json, get_cloudcare_apps, get_filtered_cases, get_filters_from_request,\
-    api_closed_to_status, CaseAPIResult, CASE_STATUS_OPEN, get_app_json
+    api_closed_to_status, CaseAPIResult, CASE_STATUS_OPEN, get_app_json, look_up_app
 from dimagi.utils.parsing import string_to_boolean
 from django.conf import settings
 from corehq.apps.cloudcare import touchforms_api
@@ -55,20 +55,44 @@ def cloudcare_main(request, domain, urlPath):
         # is a reasonable default for "something went wrong"
         preview = True
 
+    debug = string_to_boolean(request.REQUEST.get("debug", "false"))
+
     app_access = ApplicationAccess.get_by_domain(domain)
     
-    def _app_latest_build_json(app_id):
-        build = ApplicationBase.view('app_manager/saved_app',
+    def _app_latest_or_released_build_json(app_id):
+        app_builds = ApplicationBase.view('app_manager/saved_app',
                                      startkey=[domain, app_id, {}],
                                      endkey=[domain, app_id],
-                                     descending=True,
-                                     limit=1).one()
-        return get_app_json(build) if build else None
+                                     descending=True).all()
 
-    if not preview:
+        # Get latest 'starred' build
+        for build in app_builds:
+            build = get_app_json(build)
+            if build['is_released']:
+                return build
+
+        return get_app_json(app_builds[0]) if app_builds else None
+
+    def _app_all_versions(apps):
+        all_app_versions = []
+        for app in apps:
+            builds = ApplicationBase.view('app_manager/saved_app',
+                                         startkey=[domain, app['_id'], {}],
+                                         endkey=[domain, app['_id']],
+                                         descending=True).all()
+            for build in builds:
+                all_app_versions.append(get_app_json(build))
+
+        return all_app_versions
+
+    if debug:
         apps = get_cloudcare_apps(domain)
-        # replace the apps with the last build of each app
-        apps = [_app_latest_build_json(app["_id"]) for app in apps]
+        # replace the apps with the last starred build of each app
+        apps = _app_all_versions(apps)
+    elif not preview:
+        apps = get_cloudcare_apps(domain)
+        # replace the apps with the last starred build of each app
+        apps = [_app_latest_or_released_build_json(app["_id"]) for app in apps]
     else:
         apps = ApplicationBase.view('app_manager/applications_brief', startkey=[domain], endkey=[domain, {}])
         apps = [get_app_json(app) for app in apps if app and app.application_version == V2]
@@ -76,7 +100,7 @@ def cloudcare_main(request, domain, urlPath):
     # trim out empty apps
     apps = filter(lambda app: app, apps)
     apps = filter(lambda app: app_access.user_can_access_app(request.couch_user, app), apps)
-    
+
     def _default_lang():
         if apps:
             # unfortunately we have to go back to the DB to find this
@@ -107,27 +131,43 @@ def cloudcare_main(request, domain, urlPath):
         split = urlPath.split('/')
         app_id = split[1] if len(split) >= 2 else None
         case_id = split[5] if len(split) >= 6 else None
-        
+
         app = None
-        if app_id:
-            if app_id in [a['_id'] for a in apps]:
+
+        if debug:
+            print app_id
+            if app_id:
+                if app_id in [a['_id'] for a in apps]:
+                    app = look_up_app(domain, app_id)
+                else:
+                    messages.info(request, _("That app is no longer valid. Try using the "
+                                             "navigation links to select an app."))
+            if app is None:
+                app = look_up_app(domain, apps[0]['_id'])
+        else:
+            if app_id:
                 app = look_up_app_json(domain, app_id)
-            else:
-                messages.info(request, _("That app is no longer valid. Try using the "
-                                         "navigation links to select an app."))
-        if app is None and len(apps) == 1:
-            app = look_up_app_json(domain, apps[0]['_id'])
+                if app is None:
+                    messages.info(request, _("That app is no longer valid. Try using the "
+                                             "navigation links to select an app."))
+            if app is None and len(apps) == 1:
+                app = look_up_app_json(domain, apps[0]['copy_of'])
+
 
         def _get_case(domain, case_id):
             case = CommCareCase.get(case_id)
             assert case.domain == domain, "case %s not in %s" % (case_id, domain)
             return case.get_json()
-        
         case = _get_case(domain, case_id) if case_id else None
+
+        print app
         return {
             "app": app,
             "case": case
         }
+
+
+    print len(apps)
 
     context = {
        "domain": domain,
@@ -135,9 +175,11 @@ def cloudcare_main(request, domain, urlPath):
        "apps": apps,
        "apps_raw": apps,
        "preview": preview,
+       "debug": debug,
        "maps_api_key": settings.GMAPS_API_KEY,
        'offline_enabled': toggles.OFFLINE_CLOUDCARE.enabled(request.user.username),
     }
+    print context
     context.update(_url_context())
     return render(request, "cloudcare/cloudcare_home.html", context)
 
