@@ -131,7 +131,12 @@ cloudCare.App = LocalizableModel.extend({
             var index = 0;
             self.modules = _(self.get("modules")).map(function (module) {
                 var ret = new cloudCare.Module(module);
-                ret.set("app_id", self.id);
+
+                if (self.attributes.debug) {
+                    ret.set("app_id", self.attributes._id);
+                } else {
+                    ret.set("app_id", self.attributes.copy_of);
+                }
                 ret.set("index", index);
                 index++;
                 return ret;
@@ -612,14 +617,21 @@ cloudCare.AppMainView = Backbone.View.extend({
             // if you pass in model: it will auto-populate the view
             model: self.initialApp,  
             language: self.options.language,
+            debug: self.options.debug,
             caseUrlRoot: self.options.caseUrlRoot,
             urlRoot: self.options.urlRoot,
             submitUrlRoot: self.options.submitUrlRoot
         });
 
         cloudCare.dispatch.on("app:selected", function (app) {
-            self.navigate("view/" + app.model.attributes.copy_of);
-            self.selectApp(app.model.id);
+            if(self.options.debug == "True"){
+                self.navigate("view/" + app.model.attributes._id);
+                self.selectApp(app.model.attributes.copy_of);
+            } else {
+                app.model.id = app.model.attributes.copy_of
+                self.navigate("view/" + app.model.attributes.copy_of);
+                self.selectApp(app.model.attributes.copy_of);
+            }
         });
         cloudCare.dispatch.on("app:deselected", function (app) {
             self._selectedModule = null;

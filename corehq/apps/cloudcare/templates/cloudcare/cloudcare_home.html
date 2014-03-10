@@ -51,6 +51,7 @@
         var apps = {{ apps|JSON }};
         var initialApp = {{ app|JSON }};
         var initialCase = {{ case|JSON }};
+        var debugApp = "{{ debug }}";
         window.mainView = new cloudCare.AppMainView({
 			apps: apps,
 			language: language,
@@ -59,7 +60,8 @@
 			caseUrlRoot: caseUrlRoot,
 			submitUrlRoot: submitUrlRoot,
 			initialApp: initialApp,
-			initialCase: initialCase
+			initialCase: initialCase,
+            debug: debugApp
         });
         // TODO: when we figure out what to do about get params, use this
         Backbone.history.start({pushState: true, root: urlRoot});

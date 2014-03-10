@@ -85,11 +85,7 @@ def cloudcare_main(request, domain, urlPath):
 
         return all_app_versions
 
-    if debug:
-        apps = get_cloudcare_apps(domain)
-        # replace the apps with the last starred build of each app
-        apps = _app_all_versions(apps)
-    elif not preview:
+    if not preview:
         apps = get_cloudcare_apps(domain)
         # replace the apps with the last starred build of each app
         apps = [_app_latest_or_released_build_json(app["_id"]) for app in apps]
@@ -135,10 +131,10 @@ def cloudcare_main(request, domain, urlPath):
         app = None
 
         if debug:
-            print app_id
             if app_id:
-                if app_id in [a['_id'] for a in apps]:
+                if app_id in [a['_id'] for a in _app_all_versions(get_cloudcare_apps(domain))]:
                     app = look_up_app(domain, app_id)
+                    print 'found!'
                 else:
                     messages.info(request, _("That app is no longer valid. Try using the "
                                              "navigation links to select an app."))
@@ -160,7 +156,7 @@ def cloudcare_main(request, domain, urlPath):
             return case.get_json()
         case = _get_case(domain, case_id) if case_id else None
 
-        print app
+        app.__setitem__('debug', debug)
         return {
             "app": app,
             "case": case
@@ -168,6 +164,8 @@ def cloudcare_main(request, domain, urlPath):
 
 
     print len(apps)
+    for app in apps:
+        print app['_id']
 
     context = {
        "domain": domain,
@@ -179,7 +177,6 @@ def cloudcare_main(request, domain, urlPath):
        "maps_api_key": settings.GMAPS_API_KEY,
        'offline_enabled': toggles.OFFLINE_CLOUDCARE.enabled(request.user.username),
     }
-    print context
     context.update(_url_context())
     return render(request, "cloudcare/cloudcare_home.html", context)
 
