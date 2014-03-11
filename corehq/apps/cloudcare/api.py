@@ -344,24 +344,23 @@ def get_app_json(app):
     app_json['post_url'] = app.post_url
     return app_json
 
-def look_up_app(domain, app_id):
+def look_up_exact_app(domain, app_id):
     app = Application.get(app_id)
     assert(app.domain == domain)
     return get_app_json(app)
 
-def look_up_app_json(domain, app_id):
-
+def look_up_latest_or_released_app_json(domain, overall_app_id):
     app_builds = ApplicationBase.view('app_manager/saved_app',
-                                     startkey=[domain, app_id, {}],
-                                     endkey=[domain, app_id],
-                                     descending=True).all()
+        startkey=[domain, overall_app_id, {}],
+        endkey=[domain, overall_app_id],
+        descending=True).all()
 
     # Get latest 'starred' build
     for build in app_builds:
         build = get_app_json(build)
         if build['is_released']:
 
-            app = Application.get(app_id)
+            app = Application.get(overall_app_id)
             copy = Application.get(build['_id'])
             app = app.make_reversion_to_copy(copy)
             app.save()

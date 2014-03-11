@@ -90,7 +90,12 @@ cloudCare.AppListView = Backbone.View.extend({
         $('ul', this.el).append(appView.render().el);
     },
     getAppView: function (appId) {
+        if (this.options.apps.debug) {
+            return this._appViews[this.options.apps.copy_of];
+        }
+
         return this._appViews[appId];
+
     },
 
     clearSelectionState: function () {
@@ -617,14 +622,13 @@ cloudCare.AppMainView = Backbone.View.extend({
             // if you pass in model: it will auto-populate the view
             model: self.initialApp,  
             language: self.options.language,
-            debug: self.options.debug,
             caseUrlRoot: self.options.caseUrlRoot,
             urlRoot: self.options.urlRoot,
             submitUrlRoot: self.options.submitUrlRoot
         });
 
         cloudCare.dispatch.on("app:selected", function (app) {
-            if(self.options.debug == "True"){
+            if(app.model.attributes.debug) {
                 self.navigate("view/" + app.model.attributes._id);
                 self.selectApp(app.model.attributes.copy_of);
             } else {

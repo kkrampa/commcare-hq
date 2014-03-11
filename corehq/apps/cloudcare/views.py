@@ -18,8 +18,8 @@ from django.http import HttpResponseRedirect, HttpResponse, HttpResponseBadReque
 from django.shortcuts import render
 from corehq.apps.app_manager.models import Application, ApplicationBase
 import json
-from corehq.apps.cloudcare.api import look_up_app_json, get_cloudcare_apps, get_filtered_cases, get_filters_from_request,\
-    api_closed_to_status, CaseAPIResult, CASE_STATUS_OPEN, get_app_json, look_up_app
+from corehq.apps.cloudcare.api import look_up_latest_or_released_app_json, get_cloudcare_apps, get_filtered_cases, get_filters_from_request,\
+    api_closed_to_status, CaseAPIResult, CASE_STATUS_OPEN, get_app_json, look_up_exact_app
 from dimagi.utils.parsing import string_to_boolean
 from django.conf import settings
 from corehq.apps.cloudcare import touchforms_api
@@ -65,7 +65,7 @@ def cloudcare_main(request, domain, urlPath):
                                      endkey=[domain, app_id],
                                      descending=True).all()
 
-        # Get latest 'starred' build
+        # Get latest 'starred' or latest released build
         for build in app_builds:
             build = get_app_json(build)
             if build['is_released']:
@@ -130,25 +130,22 @@ def cloudcare_main(request, domain, urlPath):
 
         app = None
 
-        if debug:
-            if app_id:
-                if app_id in [a['_id'] for a in _app_all_versions(get_cloudcare_apps(domain))]:
-                    app = look_up_app(domain, app_id)
-                    print 'found!'
-                else:
-                    messages.info(request, _("That app is no longer valid. Try using the "
-                                             "navigation links to select an app."))
+        if debug and app_id:
+            if app_id in [a['_id'] for a in _app_all_versions(get_cloudcare_apps(domain))]:
+                app = look_up_exact_app(domain, app_id)
+            else:
+                messages.info(request, _("That app is no longer valid. Try using the "
+                                         "navigation links to select an app."))
             if app is None:
-                app = look_up_app(domain, apps[0]['_id'])
+                app = look_up_exact_app(domain, apps[0]['_id'])
         else:
             if app_id:
-                app = look_up_app_json(domain, app_id)
+                app = look_up_latest_or_released_app_json(domain, app_id)
                 if app is None:
                     messages.info(request, _("That app is no longer valid. Try using the "
                                              "navigation links to select an app."))
             if app is None and len(apps) == 1:
-                app = look_up_app_json(domain, apps[0]['copy_of'])
-
+                app = look_up_latest_or_released_app_json(domain, apps[0]['copy_of'])
 
         def _get_case(domain, case_id):
             case = CommCareCase.get(case_id)
@@ -156,16 +153,15 @@ def cloudcare_main(request, domain, urlPath):
             return case.get_json()
         case = _get_case(domain, case_id) if case_id else None
 
-        app.__setitem__('debug', debug)
+        # Set flag in dict, to indicate which 'id' use in formplayer
+        if app:
+            app.__setitem__('debug', debug)
+
         return {
             "app": app,
             "case": case
         }
-
-
-    print len(apps)
-    for app in apps:
-        print app['_id']
+    print apps
 
     context = {
        "domain": domain,
@@ -173,11 +169,15 @@ def cloudcare_main(request, domain, urlPath):
        "apps": apps,
        "apps_raw": apps,
        "preview": preview,
-       "debug": debug,
        "maps_api_key": settings.GMAPS_API_KEY,
        'offline_enabled': toggles.OFFLINE_CLOUDCARE.enabled(request.user.username),
     }
     context.update(_url_context())
+
+    if debug:
+        context['apps'] = context['app']
+        context['apps_raw'] = context['app']
+
     return render(request, "cloudcare/cloudcare_home.html", context)
 
 @requires_privilege_for_commcare_user(privileges.CLOUDCARE)
@@ -320,7 +320,7 @@ def get_apps_api(request, domain):
 
 @cloudcare_api
 def get_app_api(request, domain, app_id):
-    return json_response(look_up_app_json(domain, app_id))
+    return json_response(look_up_latest_or_released_app_json(domain, app_id))
 
 @cloudcare_api
 @cache_page(60 * 30)
