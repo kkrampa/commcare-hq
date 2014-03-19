@@ -28,7 +28,7 @@ cloudCare.AppNavigation = Backbone.Router.extend({
 
 
 cloudCare.AppSummary = Backbone.Model.extend({
-    idAttribute: "_id"
+    idAttribute: "copy_of"
 });
 
 cloudCare.AppSummaryView = Selectable.extend({
@@ -90,7 +90,12 @@ cloudCare.AppListView = Backbone.View.extend({
         $('ul', this.el).append(appView.render().el);
     },
     getAppView: function (appId) {
+        if (this.options.apps.debug) {
+            return this._appViews[this.options.apps.copy_of];
+        }
+
         return this._appViews[appId];
+
     },
 
     clearSelectionState: function () {
@@ -102,7 +107,7 @@ cloudCare.AppListView = Backbone.View.extend({
 });
 
 cloudCare.App = LocalizableModel.extend({
-    idAttribute: "_id",
+    idAttribute: "copy_of",
     initialize: function () {
         var self = this;
         self.constructor.__super__.initialize.apply(self, [self.options]);
@@ -131,7 +136,12 @@ cloudCare.App = LocalizableModel.extend({
             var index = 0;
             self.modules = _(self.get("modules")).map(function (module) {
                 var ret = new cloudCare.Module(module);
-                ret.set("app_id", self.id);
+
+                if (self.attributes.debug) {
+                    ret.set("app_id", self.attributes._id);
+                } else {
+                    ret.set("app_id", self.attributes.copy_of);
+                }
                 ret.set("index", index);
                 index++;
                 return ret;
@@ -618,8 +628,14 @@ cloudCare.AppMainView = Backbone.View.extend({
         });
 
         cloudCare.dispatch.on("app:selected", function (app) {
-            self.navigate("view/" + app.model.id);
-            self.selectApp(app.model.id);
+            if(app.model.attributes.debug) {
+                self.navigate("view/" + app.model.attributes._id);
+                self.selectApp(app.model.attributes.copy_of);
+            } else {
+                app.model.id = app.model.attributes.copy_of
+                self.navigate("view/" + app.model.attributes.copy_of);
+                self.selectApp(app.model.attributes.copy_of);
+            }
         });
         cloudCare.dispatch.on("app:deselected", function (app) {
             self._selectedModule = null;
