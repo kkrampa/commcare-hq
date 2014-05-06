@@ -9,7 +9,7 @@ from corehq.apps.reports.standard import CustomProjectReport
 from casexml.apps.case.models import CommCareCase
 from corehq.apps.users.models import CouchUser
 from custom.succeed.reports import DrilldownReportMixin, VISIT_SCHEDULE, CM_APP_PD_MODULE, CM_APP_HUD_MODULE, CM_APP_CM_MODULE, CM_APP_CHW_MODULE, \
-    EMPTY_FIELD, OUTPUT_DATE_FORMAT, INPUT_DATE_FORMAT, PM2, PM_APP_PM_MODULE, CHW_APP_MA_MODULE, CHW_APP_PD_MODULE
+    EMPTY_FIELD, OUTPUT_DATE_FORMAT, INPUT_DATE_FORMAT, PM2, PM_APP_PM_MODULE, CHW_APP_MA_MODULE, CHW_APP_PD_MODULE, PM3, PM4
 from custom.succeed.reports import PD1, PD2, HUD2, CM6, CHW3
 from custom.succeed.reports.patient_Info import PatientInfoDisplay
 from custom.succeed.utils import SUCCEED_CM_APPNAME, is_pm_or_pi, is_cm, SUCCEED_PM_APPNAME, SUCCEED_CHW_APPNAME, is_chw
@@ -33,6 +33,14 @@ class PatientInfoReport(CustomProjectReport, DrilldownReportMixin, ElasticProjec
         if self.request.GET.get('patient_id', None) is None:
             return None
         return CommCareCase.get(self.request.GET['patient_id'])
+
+    @property
+    def patient_status_access(self):
+        user = self.request.couch_user
+        print user
+        if is_pm_or_pi(user):
+            return True
+        return False
 
     @property
     def report_context(self):
@@ -84,6 +92,7 @@ class PatientInfoReport(CustomProjectReport, DrilldownReportMixin, ElasticProjec
         ret['patient'] = case
         ret['root_url'] = '?patient_id=%s' % case['_id']
         ret['view_mode'] = view_mode
+        ret['patient_status_access'] = self.patient_status_access
 
         if view_mode == 'info':
             self.report_template_path = "patient_info.html"
@@ -153,7 +162,14 @@ class PatientInfoReport(CustomProjectReport, DrilldownReportMixin, ElasticProjec
         elif view_mode == 'plan':
             self.report_template_path = "patient_plan.html"
         elif view_mode == 'status':
-            self.report_template_path = "patient_status.html"
+            if self.patient_status_access:
+                self.report_template_path = "patient_status.html"
+                ret['disenroll_patient_url'] = get_form_url(pm_app_dict, latest_pm_build, PM_APP_PM_MODULE, PM3)
+                ret['change_patient_data_url'] = get_form_url(pm_app_dict, latest_pm_build, PM_APP_PM_MODULE, PM4)
+            else:
+                self.report_template_path = "error.html"
+                ret['error_message'] = "Only PMs can disenrollment participants"
+                return ret
         else:
             raise Http404
         return ret
