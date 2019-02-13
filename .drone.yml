@@ -13,6 +13,9 @@ steps:
     dockerfile: docker/env.Dockerfile
     repo: kkrampa/commcarehq
     auto_tag: true
+    tags:
+      - ${DRONE_COMMIT_SHA}
+      - ${DRONE_BUILD_NUMBER}
     username:
       from_secret: docker_username
     password:
@@ -24,6 +27,9 @@ steps:
     dockerfile: docker/staticfiles.Dockerfile
     repo: kkrampa/commcarehq-staticfiles
     auto_tag: true
+    tags:
+      - ${DRONE_COMMIT_SHA}
+      - ${DRONE_BUILD_NUMBER}
     username:
       from_secret: docker_username
     password:
