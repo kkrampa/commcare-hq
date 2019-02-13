@@ -1,0 +1,38 @@
+kind: pipeline
+name: default
+
+steps:
+- name: pull submodules
+  image: docker:git
+  commands:
+    - git submodule update --depth 5 --init --recursive
+
+- name: commcarehq docker build
+  image: plugins/docker
+  settings:
+    dockerfile: docker/env.Dockerfile
+    repo: kkrampa/commcarehq
+    tags:
+      - ${DRONE_COMMIT_SHA}
+      - ${DRONE_COMMIT_BRANCH}
+      - ${DRONE_BUILD_NUMBER}
+      - latest
+    username:
+      from_secret: docker_username
+    password:
+      from_secret: docker_password
+
+- name: commcarehq staticfiles docker build
+  image: plugins/docker
+  settings:
+    dockerfile: docker/staticfiles.Dockerfile
+    repo: kkrampa/commcarehq-staticfiles
+    tags:
+      - ${DRONE_COMMIT_SHA}
+      - ${DRONE_COMMIT_BRANCH}
+      - ${DRONE_BUILD_NUMBER}
+      - latest
+    username:
+      from_secret: docker_username
+    password:
+      from_secret: docker_password
