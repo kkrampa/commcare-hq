@@ -128,9 +128,9 @@ ELASTICSEARCH_HOST = os.getenv('ELASTICSEARCH_HOST', 'elasticsearch')
 ELASTICSEARCH_PORT = os.getenv('ELASTICSEARCH_PORT', 9200)
 
 S3_BLOB_DB_SETTINGS = {
-    "url": "http://riakcs:9980/",
-    "access_key": "admin-key",
-    "secret_key": "admin-secret",
+    "url": os.getenv('RIAKCS_URL', "http://riakcs:9980/"),
+    "access_key": os.getenv('RIAKCS_ACCESS_KEY', "admin-key"),
+    "secret_key": os.getenv('RIAKCS_SECRET_KEY', "admin-secret"),
     "config": {
         "connect_timeout": 3,
         "read_timeout": 5,
@@ -248,3 +248,5 @@ DEBUG = False
 LESS_DEBUG = False
 COMPRESS_ENABLED = True
 COMPRESS_OFFLINE = True
+
+FORMPLAYER_URL = os.getenv('FORMPLAYER_URL')
