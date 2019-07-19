@@ -66,8 +66,8 @@ docker/data
 fab/config.py
 
 .git
-=======
-*
 !requirements
 !requirements-python3
+!bower.json
 !package.json
+!docker/prodsettings.py

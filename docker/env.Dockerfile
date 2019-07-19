@@ -6,9 +6,9 @@ WORKDIR /app
 
 COPY . /app
 
-
 RUN cp docker/prodsettings.py localsettings.py
 RUN bower install && \
+     pip install -r requirements/requirements.txt && \
      python manage.py collectstatic --noinput && \
      python manage.py compilejsi18n && \
      python manage.py fix_less_imports_collectstatic && \
