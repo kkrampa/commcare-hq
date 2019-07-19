@@ -16,7 +16,7 @@ from corehq.apps.data_interfaces.utils import property_references_parent
 from corehq.apps.es.cases import CaseES
 from corehq.apps.users.util import SYSTEM_USER_ID
 from corehq.form_processor.abstract_models import DEFAULT_PARENT_IDENTIFIER
-from corehq.form_processor.interfaces.dbaccessors import FormAccessors
+from corehq.form_processor.interfaces.dbaccessors import FormAccessors, CaseAccessors
 from corehq.form_processor.exceptions import CaseNotFound
 from corehq.form_processor.models import CommCareCaseSQL
 from corehq.messaging.scheduling.const import (
@@ -45,8 +45,10 @@ from corehq.messaging.scheduling.scheduling_partitioned.dbaccessors import (
     get_case_timed_schedule_instances_for_schedule_id,
 )
 from corehq.messaging.scheduling.scheduling_partitioned.models import CaseScheduleInstanceMixin
-from corehq.sql_db.util import run_query_across_partitioned_databases, get_db_aliases_for_partitioned_query
+from corehq.sql_db.util import get_db_aliases_for_partitioned_query, \
+    paginate_query, paginate_query_across_partitioned_databases
 from corehq.util.log import with_progress_bar
+from corehq.util.python_compatibility import soft_assert_type_text
 from corehq.util.quickcache import quickcache
 from corehq.util.test_utils import unit_testing_only
 from couchdbkit.exceptions import ResourceNotFound
@@ -68,13 +70,15 @@ from jsonobject.api import JsonObject
 from jsonobject.properties import StringProperty, BooleanProperty, IntegerProperty
 import six
 
-ALLOWED_DATE_REGEX = re.compile('^\d{4}-\d{2}-\d{2}')
+ALLOWED_DATE_REGEX = re.compile(r'^\d{4}-\d{2}-\d{2}')
 AUTO_UPDATE_XMLNS = 'http://commcarehq.org/hq_case_update_rule'
 
 
 def _try_date_conversion(date_or_string):
+    if isinstance(date_or_string, bytes):
+        date_or_string = date_or_string.decode('utf-8')
     if (
-        isinstance(date_or_string, six.string_types) and
+        isinstance(date_or_string, six.text_type) and
         ALLOWED_DATE_REGEX.match(date_or_string)
     ):
         try:
@@ -478,14 +482,14 @@ class AutomaticUpdateRule(models.Model):
         return date
 
     @classmethod
-    def get_case_ids(cls, domain, case_type, boundary_date=None, db=None):
+    def iter_cases(cls, domain, case_type, boundary_date=None, db=None):
         if should_use_sql_backend(domain):
-            return cls._get_case_ids_from_postgres(domain, case_type, boundary_date=boundary_date, db=db)
+            return cls._iter_cases_from_postgres(domain, case_type, boundary_date=boundary_date, db=db)
         else:
-            return cls._get_case_ids_from_es(domain, case_type, boundary_date=boundary_date)
+            return cls._iter_cases_from_es(domain, case_type, boundary_date=boundary_date)
 
     @classmethod
-    def _get_case_ids_from_postgres(cls, domain, case_type, boundary_date=None, db=None):
+    def _iter_cases_from_postgres(cls, domain, case_type, boundary_date=None, db=None):
         q_expression = Q(
             domain=domain,
             type=case_type,
@@ -497,11 +501,16 @@ class AutomaticUpdateRule(models.Model):
             q_expression = q_expression & Q(server_modified_on__lte=boundary_date)
 
         if db:
-            for c_id in CommCareCaseSQL.objects.using(db).filter(q_expression).values_list('case_id', flat=True):
-                yield c_id
+            return paginate_query(db, CommCareCaseSQL, q_expression, load_source='auto_update_rule')
         else:
-            for c_id in run_query_across_partitioned_databases(CommCareCaseSQL, q_expression, values=['case_id']):
-                yield c_id
+            return paginate_query_across_partitioned_databases(
+                CommCareCaseSQL, q_expression, load_source='auto_update_rule'
+            )
+
+    @classmethod
+    def _iter_cases_from_es(cls, domain, case_type, boundary_date=None):
+        case_ids = list(cls._get_case_ids_from_es(domain, case_type, boundary_date))
+        return CaseAccessors(domain).iter_cases(case_ids)
 
     @classmethod
     def _get_case_ids_from_es(cls, domain, case_type, boundary_date=None):
@@ -518,6 +527,7 @@ class AutomaticUpdateRule(models.Model):
         for case_id in query.scroll():
             if not isinstance(case_id, six.string_types):
                 raise ValueError("Something is wrong with the query, expected ids only")
+            soft_assert_type_text(case_id)
 
             yield case_id
 
@@ -826,6 +836,7 @@ class MatchPropertyDefinition(CaseRuleCriteriaDefinition):
             if value is None:
                 continue
             if isinstance(value, six.string_types) and not value.strip():
+                soft_assert_type_text(value)
                 continue
             return True
 
@@ -841,7 +852,10 @@ class MatchPropertyDefinition(CaseRuleCriteriaDefinition):
             return False
 
         for value in self.get_case_values(case):
-            if isinstance(value, six.string_types):
+            if six.PY2 and isinstance(value, bytes):
+                value = value.decode('utf-8')
+            if isinstance(value, (six.text_type, bytes)):
+                soft_assert_type_text(value)
                 try:
                     if regex.match(value):
                         return True
@@ -940,6 +954,11 @@ class CaseRuleActionResult(object):
 
     def __eq__(self, other):
         return self.__dict__ == other.__dict__
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    __hash__ = None
 
     def _validate_int(self, value):
         if not isinstance(value, int):
@@ -1403,6 +1422,12 @@ class CreateScheduleInstanceActionDefinition(CaseRuleActionDefinition):
 
 
 class CaseRuleSubmission(models.Model):
+    """This model records which forms were submitted as a result of a case
+    update rule. This serves both as a log as well as providing the ability
+    to undo the effects of rules in case of errors.
+
+    This data is not stored permanently but is removed after 90 days (see tasks file)
+    """
     domain = models.CharField(max_length=126)
     rule = models.ForeignKey('AutomaticUpdateRule', on_delete=models.PROTECT)
 

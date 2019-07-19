@@ -81,11 +81,6 @@ UNLIMITED_FEATURE_USAGE = -1
 
 MINIMUM_SUBSCRIPTION_LENGTH = 30
 
-_soft_assert_domain_not_loaded = soft_assert(
-    to='{}@{}'.format('npellegrino', 'dimagi.com'),
-    exponential_backoff=False,
-)
-
 _soft_assert_contact_emails_missing = soft_assert(
     to=['{}@{}'.format(email, 'dimagi.com') for email in [
         'accounts',
@@ -641,6 +636,9 @@ class SoftwareProductRate(models.Model):
                 return False
         return True
 
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
     @classmethod
     def new_rate(cls, product_name, monthly_fee, save=True):
         rate = SoftwareProductRate(name=product_name, monthly_fee=monthly_fee)
@@ -704,6 +702,9 @@ class FeatureRate(models.Model):
             if not getattr(self, field) == getattr(other, field):
                 return False
         return True
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
 
     @classmethod
     def new_rate(cls, feature_name, feature_type,
@@ -997,9 +998,6 @@ class Subscriber(models.Model):
         downgraded_privileges is the list of privileges that should be removed
         upgraded_privileges is the list of privileges that should be added
         """
-        _soft_assert_domain_not_loaded(isinstance(self.domain, six.string_types), "domain is object")
-
-
         if new_plan_version is None:
             new_plan_version = DefaultProductPlan.get_default_plan_version()
 
@@ -1124,12 +1122,19 @@ class Subscription(models.Model):
             and other.account.pk == self.account.pk
         )
 
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
     def save(self, *args, **kwargs):
         """
         Overloaded to update domain pillow with subscription information
         """
+        from corehq.apps.accounting.mixins import get_overdue_invoice
+
         super(Subscription, self).save(*args, **kwargs)
         Subscription._get_active_subscription_by_domain.clear(Subscription, self.subscriber.domain)
+        get_overdue_invoice.clear(self.subscriber.domain)
+
         try:
             Domain.get_by_name(self.subscriber.domain).save()
         except Exception:
@@ -2001,6 +2006,12 @@ class Invoice(InvoiceBase):
     class Meta(object):
         app_label = 'accounting'
 
+    def save(self, *args, **kwargs):
+        from corehq.apps.accounting.mixins import get_overdue_invoice
+
+        super(Invoice, self).save(*args, **kwargs)
+        get_overdue_invoice.clear(self.subscription.subscriber.domain)
+
     @property
     def email_recipients(self):
         if self.subscription.service_type == SubscriptionType.IMPLEMENTATION:
@@ -2137,6 +2148,10 @@ class CustomerInvoice(InvoiceBase):
         except BillingContactInfo.DoesNotExist:
             contact_emails = []
         return contact_emails
+
+    @property
+    def contact_emails(self):
+        return self.account.enterprise_admin_emails
 
     @property
     def subtotal(self):
@@ -3155,6 +3170,19 @@ class CreditLine(models.Model):
                     'balance': self.balance,
                 })
 
+    def save(self, *args, **kwargs):
+        from corehq.apps.accounting.mixins import (
+            get_credits_available_for_product_in_account,
+            get_credits_available_for_product_in_subscription,
+        )
+
+        super(CreditLine, self).save(*args, **kwargs)
+        if self.account:
+            get_credits_available_for_product_in_account.clear(self.account)
+        if self.subscription:
+            get_credits_available_for_product_in_subscription.clear(self.subscription)
+
+
     def adjust_credit_balance(self, amount, is_new=False, note=None,
                               line_item=None, invoice=None, customer_invoice=None,
                               payment_record=None, related_credit=None,
@@ -3288,7 +3316,7 @@ class CreditLine(models.Model):
     def get_credits_for_account(cls, account, feature_type=None, is_product=False):
         assert not (feature_type and is_product)
         return cls.objects.filter(
-            account=account, subscription__exact=None
+            account=account, subscription__exact=None, is_active=True
         ).filter(
             is_product=is_product, feature_type__exact=feature_type
         ).all()
@@ -3302,11 +3330,12 @@ class CreditLine(models.Model):
             subscription=subscription,
             feature_type__exact=feature_type,
             is_product=is_product,
+            is_active=True
         ).all()
 
     @classmethod
     def get_non_general_credits_by_subscription(cls, subscription):
-        return cls.objects.filter(subscription=subscription).filter(
+        return cls.objects.filter(subscription=subscription, is_active=True).filter(
             Q(is_product=True) |
             Q(feature_type__in=[f[0] for f in FeatureType.CHOICES])
         ).all()
@@ -3332,6 +3361,7 @@ class CreditLine(models.Model):
                 subscription__exact=subscription,
                 is_product=is_product,
                 feature_type__exact=feature_type,
+                is_active=True
             )
             if not permit_inactive and not credit_line.is_active and not invoice:
                 raise CreditLineError(
@@ -3350,7 +3380,7 @@ class CreditLine(models.Model):
                     'feature': (" | Feature %s" % feature_type
                                 if feature_type is not None else ""),
                     'product': (" | Product" if is_product else ""),
-                    'error': e.message,
+                    'error': six.text_type(e),
                 }
             )
         except cls.DoesNotExist:
@@ -3651,12 +3681,7 @@ class DomainUserHistory(models.Model):
     """
     domain = models.CharField(max_length=256)
     record_date = models.DateField()
-    num_users = models.IntegerField(default=0, null=True)
+    num_users = models.IntegerField(default=0)
 
-    @classmethod
-    def create(cls, domain, num_users, record_date):
-        return cls(
-            domain=domain,
-            num_users=num_users,
-            record_date=record_date
-        )
+    class Meta:
+        unique_together = ('domain', 'record_date')

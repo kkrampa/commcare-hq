@@ -23,6 +23,13 @@ class HQFormHelper(FormHelper):
     label_class = CSS_LABEL_CLASS
     field_class = CSS_FIELD_CLASS
 
+    def __init__(self, *args, **kwargs):
+        super(HQFormHelper, self).__init__(*args, **kwargs)
+        if 'autocomplete' not in self.attrs:
+            self.attrs.update({
+                'autocomplete': 'off',
+            })
+
 
 class HQModalFormHelper(FormHelper):
     form_class = 'form form-horizontal'
@@ -59,7 +66,7 @@ class ErrorsOnlyField(OldField):
 
 def _get_offsets(context):
     label_class = context.get('label_class', '')
-    return re.sub(r'(xs|sm|md|lg)-', '\g<1>-offset-', label_class)
+    return re.sub(r'(xs|sm|md|lg)-', r'\g<1>-offset-', label_class)
 
 
 class FormActions(OriginalFormActions):
@@ -176,6 +183,7 @@ class B3MultiField(LayoutObject):
         self.css_id = kwargs.pop('css_id', '')
         self.field_class = kwargs.pop('field_class', None)
         self.label_class = kwargs.pop('label_class', None)
+        self.required = kwargs.pop('required', False)
         self.help_bubble_text = kwargs.pop('help_bubble_text', '')
         self.flat_attrs = flatatt(kwargs)
 
@@ -319,3 +327,11 @@ class B3HiddenFieldWithErrors(Field):
 
 class RadioSelect(Field):
     template = "hqwebapp/crispy/radioselect.html"
+
+
+def make_form_readonly(form):
+    if form is None:
+        return
+
+    for field in form.fields.keys():
+        form.fields[field].widget.attrs['disabled'] = True

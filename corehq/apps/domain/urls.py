@@ -15,6 +15,13 @@ from django.views.generic import RedirectView
 
 from corehq.apps.callcenter.views import CallCenterOwnerOptionsView
 from corehq.apps.domain.forms import ConfidentialPasswordResetForm, HQSetPasswordForm
+from corehq.apps.domain.views.releases import (
+    ManageReleasesByLocation,
+    deactivate_release_restriction,
+    activate_release_restriction,
+    toggle_release_restriction_by_app_profile,
+    ManageReleasesByAppProfile,
+)
 from corehq.apps.domain.views.settings import (
     CaseSearchConfigView,
     DefaultProjectSettingsView,
@@ -178,6 +185,7 @@ domain_settings = [
     url(r'^repeat_record_report/requeue/', requeue_repeat_record, name='requeue_repeat_record'),
     url(r'^repeat_record_report/generate_repeater_payloads/', generate_repeater_payloads,
         name='generate_repeater_payloads'),
+    url(r'^integration/', include('corehq.apps.integration.urls')),
     url(r'^forwarding/$', DomainForwardingOptionsView.as_view(), name=DomainForwardingOptionsView.urlname),
     url(r'^forwarding/new/FormRepeater/$', AddFormRepeaterView.as_view(), {'repeater_type': 'FormRepeater'},
         name=AddFormRepeaterView.urlname),
@@ -221,6 +229,15 @@ domain_settings = [
     url(r'^recovery_measures_history/$',
         RecoveryMeasuresHistory.as_view(),
         name=RecoveryMeasuresHistory.urlname),
-
+    url(r'^manage_releases_by_location/$', ManageReleasesByLocation.as_view(),
+        name=ManageReleasesByLocation.urlname),
+    url(r'^manage_releases_by_app_profile/$', ManageReleasesByAppProfile.as_view(),
+        name=ManageReleasesByAppProfile.urlname),
+    url(r'^deactivate_release_restriction/(?P<restriction_id>[\w-]+)/$', deactivate_release_restriction,
+        name='deactivate_release_restriction'),
+    url(r'^activate_release_restriction/(?P<restriction_id>[\w-]+)/$', activate_release_restriction,
+        name='activate_release_restriction'),
+    url(r'^toggle_release_restriction_by_app_profile/(?P<restriction_id>[\w-]+)/$',
+        toggle_release_restriction_by_app_profile, name='toggle_release_restriction_by_app_profile'),
     DomainReportDispatcher.url_pattern()
 ]

@@ -410,7 +410,7 @@ def synclog_to_sql_object(synclog_json_object):
 @architect.install('partition', type='range', subtype='date', constraint='week', column='date')
 class SyncLogSQL(models.Model):
 
-    synclog_id = models.UUIDField(unique=True, primary_key=True, default=uuid.uuid1().hex)
+    synclog_id = models.UUIDField(unique=True, primary_key=True, default=uuid.uuid1)
     domain = models.CharField(max_length=255, null=True, blank=True, default=None, db_index=True)
     user_id = models.CharField(max_length=255, default=None, db_index=True)
     date = models.DateTimeField(db_index=True, null=True, blank=True)
@@ -756,7 +756,6 @@ class IndexTree(DocumentSchema):
                 all_cases.add(incoming_case)
         return all_cases
 
-    @memoized
     def get_cases_that_directly_depend_on_case(self, case_id):
         return self.reverse_indices.get(case_id, set([]))
 
@@ -765,11 +764,23 @@ class IndexTree(DocumentSchema):
         prior_ids.pop(index_name, None)
         if prior_ids:
             self.indices[from_case_id] = prior_ids
+        self._clear_index_caches()
 
     def set_index(self, from_case_id, index_name, to_case_id):
         prior_ids = self.indices.get(from_case_id, {})
         prior_ids[index_name] = to_case_id
         self.indices[from_case_id] = prior_ids
+        self._clear_index_caches()
+
+    def _clear_index_caches(self):
+        try:
+            # self.reverse_indices is a memoized property, so we can't just call self.reverse_indices.reset_cache
+            self._reverse_indices_cache.clear()
+        except AttributeError:
+            pass
+
+        self.get_all_outgoing_cases.reset_cache()
+        self.traverse_incoming_extensions.reset_cache()
 
     def apply_updates(self, other_tree):
         """
@@ -1104,7 +1115,7 @@ class SimplifiedSyncLog(AbstractSyncLog):
             if case.case_id not in all_updates:
                 _get_logger().debug('initializing update for case {}'.format(case.case_id))
                 all_updates[case.case_id] = CaseUpdate(case_id=case.case_id,
-                                                   owner_ids_on_phone=self.owner_ids_on_phone)
+                                                       owner_ids_on_phone=self.owner_ids_on_phone)
 
             case_update = all_updates[case.case_id]
             case_update.was_live_previously = case.case_id in self.primary_case_ids

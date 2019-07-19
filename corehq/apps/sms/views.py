@@ -37,7 +37,6 @@ from corehq.apps.sms.dbaccessors import get_forwarding_rules_for_domain
 from corehq.apps.hqwebapp.decorators import (
     use_timepicker,
     use_typeahead,
-    use_select2,
     use_jquery_ui,
     use_datatables,
 )
@@ -72,15 +71,15 @@ from corehq.apps.domain.decorators import (
 )
 from corehq.form_processor.interfaces.dbaccessors import CaseAccessors
 from corehq.form_processor.utils import is_commcarecase
-from corehq.messaging.decorators import require_privilege_but_override_for_migrator
 from corehq.messaging.scheduling.async_handlers import SMSSettingsAsyncHandler
 from corehq.messaging.smsbackends.test.models import SQLTestSMSBackend
 from corehq.messaging.smsbackends.telerivet.models import SQLTelerivetBackend
 from corehq.messaging.util import show_messaging_dashboard
 from corehq.apps.translations.models import StandaloneTranslationDoc
 from corehq.util.dates import iso_string_to_datetime
+from corehq.util.python_compatibility import soft_assert_type_text
 from corehq.util.soft_assert import soft_assert
-from corehq.util.workbook_json.excel import WorkbookJSONReader
+from corehq.util.workbook_json.excel import get_single_worksheet
 from corehq.util.timezones.conversions import ServerTime, UserTime
 from corehq.util.quickcache import quickcache
 from django.contrib import messages
@@ -116,6 +115,7 @@ SMS_CHAT_HISTORY_CHOICES = (
     (ugettext_noop("30 Days"), 30),
 )
 
+
 @login_and_domain_required
 def default(request, domain):
     if show_messaging_dashboard(domain, request.couch_user):
@@ -127,14 +127,6 @@ def default(request, domain):
 
 class BaseMessagingSectionView(BaseDomainView):
     section_name = ugettext_noop("Messaging")
-
-    @cached_property
-    def reminders_migration_in_progress(self):
-        return toggles.REMINDERS_MIGRATION_IN_PROGRESS.enabled(self.domain)
-
-    @cached_property
-    def new_reminders_migrator(self):
-        return toggles.NEW_REMINDERS_MIGRATOR.enabled(self.request.couch_user.username)
 
     @cached_property
     def can_use_inbound_sms(self):
@@ -155,7 +147,7 @@ class BaseMessagingSectionView(BaseDomainView):
             ).plan.name
         return False
 
-    @method_decorator(require_privilege_but_override_for_migrator(privileges.OUTBOUND_SMS))
+    @method_decorator(requires_privilege_with_fallback(privileges.OUTBOUND_SMS))
     @method_decorator(require_permission(Permissions.edit_data))
     def dispatch(self, request, *args, **kwargs):
         if not self.is_granted_messaging_access:
@@ -1355,7 +1347,6 @@ class AddDomainGatewayView(AddGatewayViewMixin, BaseMessagingSectionView):
     def redirect_to_gateway_list(self):
         return HttpResponseRedirect(reverse(DomainSmsGatewayListView.urlname, args=[self.domain]))
 
-    @use_select2
     @method_decorator(domain_admin_required)
     @method_decorator(requires_privilege_with_fallback(privileges.OUTBOUND_SMS))
     def dispatch(self, request, *args, **kwargs):
@@ -1587,7 +1578,6 @@ class AddGlobalGatewayView(AddGatewayViewMixin, BaseAdminSectionView):
     def redirect_to_gateway_list(self):
         return HttpResponseRedirect(reverse(GlobalSmsGatewayListView.urlname))
 
-    @use_select2
     @method_decorator(require_superuser)
     def dispatch(self, request, *args, **kwargs):
         return super(AddGlobalGatewayView, self).dispatch(request, *args, **kwargs)
@@ -1710,7 +1700,6 @@ class SMSLanguagesView(BaseMessagingSectionView):
     page_title = ugettext_noop("Languages")
 
     @use_jquery_ui
-    @use_select2
     @method_decorator(domain_admin_required)
     def dispatch(self, *args, **kwargs):
         return super(SMSLanguagesView, self).dispatch(*args, **kwargs)
@@ -1797,8 +1786,7 @@ def download_sms_translations(request, domain):
 @get_file("bulk_upload_file")
 def upload_sms_translations(request, domain):
     try:
-        workbook = WorkbookJSONReader(request.file)
-        translations = workbook.get_worksheet(title='translations')
+        translations = get_single_worksheet(request.file, title='translations')
 
         with StandaloneTranslationDoc.get_locked_obj(domain, "sms") as tdoc:
             msg_ids = sorted(_MESSAGES.keys())
@@ -1813,7 +1801,8 @@ def upload_sms_translations(request, domain):
                         if msg_id in msg_ids:
                             val = row[lang]
                             if not isinstance(val, six.string_types):
-                                val = str(val)
+                                val = six.text_type(val)
+                            soft_assert_type_text(val)
                             val = val.strip()
                             result[lang][msg_id] = val
 
@@ -1867,7 +1856,6 @@ class SMSSettingsView(BaseMessagingSectionView, AsyncHandlerMixin):
                 self.request.POST,
                 cchq_domain=self.domain,
                 cchq_is_previewer=self.previewer,
-                new_reminders_migrator=self.new_reminders_migrator,
             )
         else:
             domain_obj = Domain.get_by_name(self.domain, strict=True)
@@ -1932,7 +1920,6 @@ class SMSSettingsView(BaseMessagingSectionView, AsyncHandlerMixin):
                 initial=initial,
                 cchq_domain=self.domain,
                 cchq_is_previewer=self.previewer,
-                new_reminders_migrator=self.new_reminders_migrator,
             )
         return form
 
@@ -2016,7 +2003,6 @@ class SMSSettingsView(BaseMessagingSectionView, AsyncHandlerMixin):
 
     @method_decorator(domain_admin_required)
     @use_timepicker
-    @use_select2
     def dispatch(self, request, *args, **kwargs):
         return super(SMSSettingsView, self).dispatch(request, *args, **kwargs)
 

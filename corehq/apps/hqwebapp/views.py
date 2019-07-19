@@ -11,6 +11,8 @@ import sys
 import traceback
 import uuid
 from datetime import datetime
+
+from django.utils import html
 from six.moves.urllib.parse import urlparse
 
 from django.conf import settings
@@ -86,6 +88,7 @@ from corehq.util.datadog.const import DATADOG_UNKNOWN
 from corehq.util.datadog.metrics import JSERROR_COUNT
 from corehq.util.datadog.utils import create_datadog_event, sanitize_url
 from corehq.util.datadog.gauges import datadog_counter, datadog_gauge
+from corehq.util.python_compatibility import soft_assert_type_text
 from corehq.util.view_utils import reverse
 import six
 from six.moves import range
@@ -189,6 +192,8 @@ def redirect_to_default(req, domain=None):
             domains = Domain.active_for_user(req.user)
 
         if 0 == len(domains) and not req.user.is_superuser:
+            from corehq.apps.registration.views import track_domainless_new_user
+            track_domainless_new_user(req)
             return redirect('registration_domain')
         elif 1 == len(domains):
             from corehq.apps.dashboard.views import dashboard_default
@@ -291,7 +296,7 @@ def server_up(req):
 
     if failed_checks and not is_deploy_in_progress():
         status_messages = [
-            '{}: {}'.format(check, status.msg)
+            html.linebreaks('<strong>{}</strong>: {}'.format(check, html.escape(status.msg)).strip())
             for check, status in failed_checks
         ]
         create_datadog_event(
@@ -299,7 +304,7 @@ def server_up(req):
             alert_type='error', aggregation_key='serverup',
         )
         status_messages.insert(0, 'Failed Checks (%s):' % os.uname()[1])
-        return HttpResponse('<br>'.join(status_messages), status=500)
+        return HttpResponse(''.join(status_messages), status=500)
     else:
         return HttpResponse("success")
 
@@ -368,6 +373,7 @@ def _login(req, domain_name):
     custom_landing_page = settings.CUSTOM_LANDING_TEMPLATE
     if custom_landing_page:
         if isinstance(custom_landing_page, six.string_types):
+            soft_assert_type_text(custom_landing_page)
             template_name = custom_landing_page
         else:
             template_name = custom_landing_page.get(req.get_host())
@@ -393,15 +399,15 @@ def _login(req, domain_name):
     else:
         auth_view = HQLoginView if not domain_name else CloudCareLoginView
 
-    demo_workflow_ab = ab_tests.SessionAbTest(ab_tests.DEMO_WORKFLOW, req)
+    demo_workflow_ab_v2 = ab_tests.SessionAbTest(ab_tests.DEMO_WORKFLOW_V2, req)
 
     if settings.IS_SAAS_ENVIRONMENT:
-        context['demo_workflow_ab'] = demo_workflow_ab.context
+        context['demo_workflow_ab_v2'] = demo_workflow_ab_v2.context
 
     response = auth_view.as_view(template_name=template_name, extra_context=context)(req)
 
     if settings.IS_SAAS_ENVIRONMENT:
-        demo_workflow_ab.update_response(response)
+        demo_workflow_ab_v2.update_response(response)
 
     return response
 
@@ -692,7 +698,7 @@ class BugReportView(View):
 
         # only fake the from email if it's an @dimagi.com account
         is_icds_env = settings.SERVER_ENVIRONMENT in settings.ICDS_ENVS
-        if re.search('@dimagi\.com$', report['username']) and not is_icds_env:
+        if re.search(r'@dimagi\.com$', report['username']) and not is_icds_env:
             email.from_email = report['username']
         else:
             email.from_email = settings.CCHQ_BUG_REPORT_EMAIL
@@ -1088,7 +1094,7 @@ def quick_find(request):
             messages.info(request, _("We've redirected you to the %s matching your query") % doc_info.type_display)
             return HttpResponseRedirect(doc_info.link)
         elif redirect and request.couch_user.is_superuser:
-            return HttpResponseRedirect('{}?id={}'.format(reverse('raw_couch'), doc.get('_id')))
+            return HttpResponseRedirect('{}?id={}'.format(reverse('raw_doc'), doc.get('_id')))
         else:
             return json_response(doc_info)
 
@@ -1195,51 +1201,11 @@ def deactivate_alert(request):
     return HttpResponseRedirect(reverse('alerts'))
 
 
-class DataTablesAJAXPaginationMixin(object):
-
-    @property
-    def echo(self):
-        return self.request.GET.get('sEcho')
-
-    @property
-    def display_start(self):
-        return int(self.request.GET.get('iDisplayStart'))
-
-    @property
-    def display_length(self):
-        return int(self.request.GET.get('iDisplayLength'))
-
-    @property
-    def search_phrase(self):
-        return self.request.GET.get('sSearch', '').strip()
-
-    def datatables_ajax_response(self, data, total_records, filtered_records=None):
-        return HttpResponse(json.dumps({
-            'sEcho': self.echo,
-            'aaData': data,
-            'iTotalRecords': total_records,
-            'iTotalDisplayRecords': filtered_records or total_records,
-        }))
-
-
-# Use instead of djangular's base JSONResponseMixin
-# Adds djng_current_rmi to view context
-class HQJSONResponseMixin(JSONResponseMixin):
-    # Add the output of djng_current_rmi to view context, which requires having
-    # the rest of the context, specifically context['view'], available.
-    # See https://github.com/jrief/django-angular/blob/master/djng/templatetags/djng_tags.py
-    def get_context_data(self, **kwargs):
-        context = super(HQJSONResponseMixin, self).get_context_data(**kwargs)
-        from djangular.templatetags.djangular_tags import djng_current_rmi
-        context['djng_current_rmi'] = json.loads(djng_current_rmi(context))
-        return context
-
-
 def redirect_to_dimagi(endpoint):
     def _redirect(request, lang_code=None):
         if settings.SERVER_ENVIRONMENT in [
             'production',
-            'softlayer',
+            'india',
             'staging',
             'changeme',
             'localdev',

@@ -24,10 +24,7 @@ from corehq.const import USER_DATE_FORMAT
 from corehq.apps.accounting.async_handlers import Select2BillingInfoHandler
 from corehq.apps.accounting.invoicing import DomainWireInvoiceFactory
 from corehq.apps.hqwebapp.tasks import send_mail_async
-from corehq.apps.hqwebapp.decorators import (
-    use_jquery_ui,
-    use_select2_v4,
-)
+from corehq.apps.hqwebapp.decorators import use_jquery_ui
 from corehq.apps.accounting.exceptions import (
     NewSubscriptionError,
     PaymentRequestError,
@@ -155,6 +152,12 @@ class DomainAccountingSettings(BaseProjectSettingsView):
     def current_subscription(self):
         return Subscription.get_active_subscription_by_domain(self.domain)
 
+    @property
+    def main_context(self):
+        context = super(DomainAccountingSettings, self).main_context
+        context['show_prepaid_modal'] = False
+        return context
+
 
 class DomainSubscriptionView(DomainAccountingSettings):
     urlname = 'domain_subscription_view'
@@ -178,6 +181,7 @@ class DomainSubscriptionView(DomainAccountingSettings):
             'price': None,
         }
         cards = None
+        trial_length = None
         if subscription:
             cards = get_customer_cards(self.request.user.username, self.domain)
             date_end = (subscription.date_end.strftime(USER_DATE_FORMAT)
@@ -228,7 +232,7 @@ class DomainSubscriptionView(DomainAccountingSettings):
             'css_class': "label-plan label-plan-%s" % plan_version.plan.edition.lower(),
             'do_not_invoice': subscription.do_not_invoice if subscription is not None else False,
             'is_trial': subscription.is_trial if subscription is not None else False,
-            'trial_length': trial_length if subscription.is_trial else None,
+            'trial_length': trial_length,
             'date_start': (subscription.date_start.strftime(USER_DATE_FORMAT)
                            if subscription is not None else None),
             'date_end': date_end,
@@ -312,6 +316,7 @@ class DomainSubscriptionView(DomainAccountingSettings):
     @property
     def page_context(self):
         from corehq.apps.domain.views.sms import SMSRatesView
+        subs = self.current_subscription
         return {
             'plan': self.plan,
             'change_plan_url': reverse(SelectPlanView.urlname, args=[self.domain]),
@@ -325,7 +330,7 @@ class DomainSubscriptionView(DomainAccountingSettings):
                 feature['account_credit'].get('is_visible')
                 for feature in self.plan.get('features')
             ),
-            'can_change_subscription': self.current_subscription.user_can_change_subscription(self.request.user)
+            'can_change_subscription': subs and subs.user_can_change_subscription(self.request.user),
         }
 
 
@@ -349,7 +354,6 @@ class EditExistingBillingAccountView(DomainAccountingSettings, AsyncHandlerMixin
         return EditBillingAccountInfoForm(self.account, self.domain, self.request.couch_user.username,
                                           is_ops_user=is_ops_user)
 
-    @use_select2_v4
     def dispatch(self, request, *args, **kwargs):
         if self.account is None:
             raise Http404()
@@ -489,7 +493,8 @@ class DomainBillingStatementsView(DomainAccountingSettings, CRUDPaginatedViewMix
                 ),
             },
             'total_balance': self.total_balance,
-            'show_plan': True
+            'show_plan': True,
+            'show_overdue_invoice_modal': False,
         })
         return pagination_context
 
@@ -542,7 +547,8 @@ class DomainBillingStatementsView(DomainAccountingSettings, CRUDPaginatedViewMix
                     "(domain: %(domain)s), but no billing record!" % {
                         'invoice_id': invoice.id,
                         'domain': self.domain,
-                    }
+                    },
+                    show_stack_trace=True
                 )
 
     def refresh_item(self, item_id):
@@ -835,6 +841,12 @@ class InternalSubscriptionManagementView(BaseAdminProjectSettingsView):
                     }
                 ))
         return self.get(request, *args, **kwargs)
+
+    @property
+    def main_context(self):
+        context = super(InternalSubscriptionManagementView, self).main_context
+        context['show_prepaid_modal'] = False
+        return context
 
     @property
     def page_context(self):
@@ -1242,10 +1254,6 @@ class ConfirmBillingAccountInfoView(ConfirmSelectedPlanView, AsyncHandlerMixin):
         Select2BillingInfoHandler,
     ]
 
-    @use_select2_v4
-    def dispatch(self, request, *args, **kwargs):
-        return super(ConfirmBillingAccountInfoView, self).dispatch(request, *args, **kwargs)
-
     @property
     def steps(self):
         last_steps = super(ConfirmBillingAccountInfoView, self).steps
@@ -1444,7 +1452,6 @@ class ConfirmSubscriptionRenewalView(DomainAccountingSettings, AsyncHandlerMixin
         Select2BillingInfoHandler,
     ]
 
-    @use_select2_v4
     @method_decorator(require_POST)
     def dispatch(self, request, *args, **kwargs):
         return super(ConfirmSubscriptionRenewalView, self).dispatch(request, *args, **kwargs)

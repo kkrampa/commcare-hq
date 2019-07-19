@@ -265,10 +265,24 @@ class DayTimeWindow(DocumentSchema):
 
 @six.python_2_unicode_compatible
 class Domain(QuickCachedDocumentMixin, BlobMixin, Document, SnapshotMixin):
-    """Domain is the highest level collection of people/stuff
-       in the system.  Pretty much everything happens at the
-       domain-level, including user membership, permission to
-       see data, reports, charts, etc."""
+    """
+        Domain is the highest level collection of people/stuff
+        in the system.  Pretty much everything happens at the
+        domain-level, including user membership, permission to
+        see data, reports, charts, etc.
+
+        Exceptions: accounting has some models that combine multiple domains,
+        which make "enterprise" multi-domain features like the enterprise dashboard possible.
+
+        Naming conventions:
+        Most often, variables representing domain names are named `domain`, and
+        variables representing domain objects are named `domain_obj`. New code should
+        follow this convention, unless it's in an area that consistently uses `domain`
+        for the object and `domain_name` for the string.
+
+        There's a `project` attribute attached to requests that's a domain object.
+        In spite of this, don't use `project` in new code.
+   """
 
     _blobdb_type_code = BLOB_CODES.domain
 
@@ -667,7 +681,7 @@ class Domain(QuickCachedDocumentMixin, BlobMixin, Document, SnapshotMixin):
 
     @classmethod
     def get_all_names(cls):
-        return [d['key'] for d in cls.get_all(include_docs=False)]
+        return sorted({d['key'] for d in cls.get_all(include_docs=False)})
 
     @classmethod
     def get_all_ids(cls):
@@ -949,13 +963,14 @@ class Domain(QuickCachedDocumentMixin, BlobMixin, Document, SnapshotMixin):
                 assert isinstance(response, list)
                 dynamic_deletion_operations.extend(response)
 
-        # delete all associated objects
+        # delete SQL models first because UCR tables are indexed by configs in couch
+        apply_deletion_operations(self.name, dynamic_deletion_operations)
+
+        # delete couch docs
         for db, related_doc_ids in get_all_doc_ids_for_domain_grouped_by_db(self.name):
             iter_bulk_delete(db, related_doc_ids, chunksize=500)
 
-        apply_deletion_operations(self.name, dynamic_deletion_operations)
-
-    def all_media(self, from_apps=None):  # todo add documentation or refactor
+    def all_media(self, from_apps=None):
         from corehq.apps.hqmedia.models import CommCareMultimedia
         dom_with_media = self if not self.is_snapshot else self.copied_from
 
@@ -973,7 +988,7 @@ class Domain(QuickCachedDocumentMixin, BlobMixin, Document, SnapshotMixin):
             for app in apps:
                 if app.doc_type != 'Application':
                     continue
-                for _, m in app.get_media_objects():
+                for _, m in app.get_media_objects(remove_unused=True):
                     if m.get_id not in media_ids:
                         media.append(m)
                         media_ids.add(m.get_id)
@@ -1018,7 +1033,7 @@ class Domain(QuickCachedDocumentMixin, BlobMixin, Document, SnapshotMixin):
             return None
 
         return (
-            self.fetch_attachment(LOGO_ATTACHMENT, return_bytes=True),
+            self.fetch_attachment(LOGO_ATTACHMENT),
             self.blobs[LOGO_ATTACHMENT].content_type
         )
 
@@ -1270,4 +1285,6 @@ class DomainAuditRecordEntry(models.Model):
     def update_calculations(cls, domain, property_to_update):
         obj, is_new = cls.objects.get_or_create(domain=domain)
         setattr(obj, property_to_update, F(property_to_update) + 1)
-        obj.save()
+        # update_fields prevents the possibility of a race condition
+        # https://stackoverflow.com/a/1599090
+        obj.save(update_fields=[property_to_update])

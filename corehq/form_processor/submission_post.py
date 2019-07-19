@@ -6,6 +6,7 @@ import logging
 from collections import namedtuple
 
 from ddtrace import tracer
+from django.db import IntegrityError
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -27,14 +28,14 @@ from corehq.apps.cloudcare.const import DEVICE_ID as FORMPLAYER_DEVICE_ID
 from corehq.apps.commtrack.exceptions import MissingProductId
 from corehq.apps.domain_migration_flags.api import any_migrations_in_progress
 from corehq.apps.users.models import CouchUser
-from corehq.apps.users.permissions import can_view_case_exports, can_view_form_exports, \
-    has_permission_to_view_report
+from corehq.apps.users.permissions import has_permission_to_view_report
 from corehq.form_processor.exceptions import CouchSaveAborted, PostSaveError
 from corehq.form_processor.interfaces.dbaccessors import FormAccessors
 from corehq.form_processor.interfaces.processor import FormProcessorInterface
 from corehq.form_processor.parsers.form import process_xform_xml
 from corehq.form_processor.utils.metadata import scrub_meta
 from corehq.form_processor.submission_process_tracker import unfinished_submission
+from corehq.util.datadog.utils import form_load_counter
 from corehq.util.global_request import get_request
 from couchforms import openrosa_response
 from couchforms.const import BadRequest, DEVICE_LOG_XMLNS
@@ -95,6 +96,7 @@ class SubmissionPost(object):
             assert case_db.domain == domain
 
         self.is_openrosa_version3 = self.openrosa_headers.get(OPENROSA_VERSION_HEADER, '') == OPENROSA_VERSION_3
+        self.track_load = form_load_counter("form_submission", domain)
 
     def _set_submission_properties(self, xform):
         # attaches shared properties of the request to the document.
@@ -160,6 +162,7 @@ class SubmissionPost(object):
             return _('Form successfully saved!')
 
         from corehq.apps.export.views.list import CaseExportListView, FormExportListView
+        from corehq.apps.export.views.utils import can_view_case_exports, can_view_form_exports
         from corehq.apps.reports.views import CaseDataView, FormDataView
         form_link = case_link = form_export_link = case_export_link = None
         form_view = 'corehq.apps.reports.standard.inspect.SubmitHistory'
@@ -212,6 +215,7 @@ class SubmissionPost(object):
         return "\n\n".join(messages)
 
     def run(self):
+        self.track_load()
         failure_response = self._handle_basic_failure_modes()
         if failure_response:
             return FormProcessingResult(failure_response, None, [], [], 'known_failures')
@@ -235,14 +239,35 @@ class SubmissionPost(object):
         submission_type = 'unknown'
         openrosa_kwargs = {}
         with result.get_locked_forms() as xforms:
+            if len(xforms) > 1:
+                self.track_load(len(xforms) - 1)
             if self.case_db:
                 case_db_cache = self.case_db
                 case_db_cache.cached_xforms.extend(xforms)
             else:
-                case_db_cache = self.interface.casedb_cache(domain=self.domain, lock=True, deleted_ok=True, xforms=xforms)
+                case_db_cache = self.interface.casedb_cache(
+                    domain=self.domain, lock=True, deleted_ok=True,
+                    xforms=xforms, load_src="form_submission",
+                )
 
             with case_db_cache as case_db:
                 instance = xforms[0]
+
+                is_edit_of_error = len(xforms) == 2 and xforms[1].is_error
+                if not instance.is_duplicate and is_edit_of_error:
+                    # edge case from ICDS where a form errors and then future re-submissions of the same
+                    # form do not have the same MD5 hash due to a bug on mobile:
+                    # see https://dimagi-dev.atlassian.net/browse/ICDS-376
+                    existing_form = xforms[1]
+                    if not existing_form.initial_processing_complete:
+                        # since we have a new form and the old one was not successfully processed
+                        # we can effectively ignore this form and process the new one as normal
+                        # since this form will have been marked as deprecated and have a new ID etc.
+                        existing_form.save()
+                        xforms = [instance]
+                    else:
+                        # not clear what to do in this case, try the normal edit workflow
+                        pass
 
                 if instance.is_duplicate:
                     with tracer.trace('submission.process_duplicate'):
@@ -499,20 +524,31 @@ def _transform_instance_to_error(interface, exception, instance):
 
 def handle_unexpected_error(interface, instance, exception):
     instance = _transform_instance_to_error(interface, exception, instance)
-    notify_submission_error(instance, exception, instance.problem)
-    FormAccessors(interface.domain).save_new_form(instance)
+
+    # get this here in case we hit the integrity error below and lose the exception context
+    exec_info = sys.exc_info()
+
+    try:
+        FormAccessors(interface.domain).save_new_form(instance)
+    except IntegrityError:
+        instance = interface.xformerror_from_xform_instance(instance, instance.problem, with_new_id=True)
+        FormAccessors(interface.domain).save_new_form(instance)
+
+    notify_submission_error(instance, instance.problem, exec_info)
 
 
-def notify_submission_error(instance, exception, message):
+def notify_submission_error(instance, message, exec_info=None):
     from corehq.util.global_request.api import get_request
+
+    exec_info = exec_info or sys.exc_info()
     domain = getattr(instance, 'domain', '---')
     details = {
         'domain': domain,
         'error form ID': instance.form_id,
     }
-    should_email = not isinstance(exception, CouchSaveAborted)  # intentionally don't double-email these
+    should_email = not isinstance(exec_info[1], CouchSaveAborted)  # intentionally don't double-email these
     if should_email:
         request = get_request()
-        notify_exception(request, message, details=details)
+        notify_exception(request, message, details=details, exec_info=exec_info)
     else:
         logging.error(message, exc_info=sys.exc_info(), extra={'details': details})

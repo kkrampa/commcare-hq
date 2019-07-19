@@ -9,6 +9,7 @@ from django.utils.translation import ugettext_noop, ugettext as _
 import math
 
 from corehq import privileges
+from corehq.apps.accounting.mixins import BillingModalsMixin
 from corehq.apps.app_manager.dbaccessors import domain_has_apps, get_brief_apps_in_domain
 from corehq.apps.dashboard.models import (
     AppsPaginator,
@@ -22,7 +23,7 @@ from corehq.apps.domain.views.base import DomainViewMixin, LoginAndDomainMixin
 from corehq.apps.domain.views.settings import DefaultProjectSettingsView
 from corehq.apps.domain.utils import user_has_custom_top_menu
 from corehq.apps.hqwebapp.view_permissions import user_can_view_reports
-from corehq.apps.hqwebapp.views import BasePageView, HQJSONResponseMixin
+from corehq.apps.hqwebapp.views import BasePageView
 from corehq.apps.linked_domain.dbaccessors import get_domain_master_link
 from corehq.apps.users.views import DefaultProjectUserSettingsView
 from corehq.apps.locations.permissions import location_safe, user_can_edit_location_types
@@ -79,7 +80,7 @@ def dashboard_tile_total(request, domain, slug):
 
 
 @location_safe
-class DomainDashboardView(LoginAndDomainMixin, BasePageView, DomainViewMixin):
+class DomainDashboardView(LoginAndDomainMixin, BillingModalsMixin, BasePageView, DomainViewMixin):
     urlname = 'dashboard_domain'
     page_title = ugettext_noop("HQ Dashboard")
     template_name = 'dashboard/base.html'
@@ -109,7 +110,6 @@ class DomainDashboardView(LoginAndDomainMixin, BasePageView, DomainViewMixin):
                     'help_text': tile.help_text,
                 }
                 if tile.paginator_class:
-                    items_per_page = 5
                     tile_context.update({
                         'has_item_list': True,
                     })

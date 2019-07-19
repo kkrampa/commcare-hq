@@ -20,10 +20,10 @@ from corehq.apps.app_manager.exceptions import ModuleNotFoundException, \
 from corehq.apps.app_manager.models import Application
 from corehq.apps.app_manager.util import (
     add_odk_profile_after_build,
-    get_enabled_build_profiles_for_version,
+    get_latest_enabled_versions_per_profile,
 )
 from corehq.apps.app_manager.views.utils import back_to_main, get_langs
-from corehq.apps.app_manager.tasks import make_async_build
+from corehq.apps.app_manager.tasks import make_async_build_v2
 from corehq.apps.builds.jadjar import convert_XML_To_J2ME
 from corehq.apps.hqmedia.views import DownloadMultimediaZip
 from corehq.util.soft_assert import soft_assert
@@ -45,6 +45,7 @@ def _get_profile(request):
     else:
         return None
 
+
 @safe_download
 def download_odk_profile(request, domain, app_id):
     """
@@ -53,7 +54,7 @@ def download_odk_profile(request, domain, app_id):
     """
     if not request.app.copy_of:
         username = request.GET.get('username', 'unknown user')
-        make_async_build.delay(request.app, username)
+        make_async_build_v2.delay(request.app.get_id, request.app.domain, request.app.version)
     else:
         request._always_allow_browser_caching = True
     profile = _get_profile(request)
@@ -67,7 +68,7 @@ def download_odk_profile(request, domain, app_id):
 def download_odk_media_profile(request, domain, app_id):
     if not request.app.copy_of:
         username = request.GET.get('username', 'unknown user')
-        make_async_build.delay(request.app, username)
+        make_async_build_v2.delay(request.app.get_id, request.app.domain, request.app.version)
     else:
         request._always_allow_browser_caching = True
     profile = _get_profile(request)
@@ -217,7 +218,7 @@ def download_file(request, domain, app_id, path):
     if download_target_version:
         parts = path.split('.')
         assert len(parts) == 2
-        target = Application.get(app_id).target_commcare_flavor
+        target = Application.get(app_id).commcare_flavor
         assert target != 'none'
         path = parts[0] + '-' + target + '.' + parts[1]
 
@@ -258,24 +259,25 @@ def download_file(request, domain, app_id, path):
         try:
             try:
                 # look for file guaranteed to exist if profile is created
-                request.app.fetch_attachment('files/{id}/profile.xml'.format(id=build_profile), return_bytes=True)
+                request.app.fetch_attachment('files/{id}/profile.xml'.format(id=build_profile))
             except ResourceNotFound:
                 request.app.create_build_files(build_profile_id=build_profile)
                 request.app.save()
         except ResourceConflict:
             if is_retry:
                 raise
+            request.app = Application.get(request.app.get_id)
             create_build_files_if_necessary_handling_conflicts(True)
 
     try:
         assert request.app.copy_of
         # lazily create language profiles to avoid slowing initial build
         try:
-            payload = request.app.fetch_attachment(full_path, return_bytes=True)
+            payload = request.app.fetch_attachment(full_path)
         except ResourceNotFound:
             if build_profile in request.app.build_profiles and build_profile_access:
                 create_build_files_if_necessary_handling_conflicts()
-                payload = request.app.fetch_attachment(full_path, return_bytes=True)
+                payload = request.app.fetch_attachment(full_path)
             else:
                 raise
         if path in ['profile.xml', 'media_profile.xml']:
@@ -331,7 +333,7 @@ def download_profile(request, domain, app_id):
     """
     if not request.app.copy_of:
         username = request.GET.get('username', 'unknown user')
-        make_async_build.delay(request.app, username)
+        make_async_build_v2.delay(request.app.get_id, request.app.domain, request.app.version)
     else:
         request._always_allow_browser_caching = True
     profile = _get_profile(request)
@@ -344,7 +346,7 @@ def download_profile(request, domain, app_id):
 def download_media_profile(request, domain, app_id):
     if not request.app.copy_of:
         username = request.GET.get('username', 'unknown user')
-        make_async_build.delay(request.app, username)
+        make_async_build_v2.delay(request.app.get_id, request.app.domain, request.app.version)
     else:
         request._always_allow_browser_caching = True
     profile = _get_profile(request)
@@ -356,7 +358,7 @@ def download_media_profile(request, domain, app_id):
 @safe_cached_download
 def download_practice_user_restore(request, domain, app_id):
     if not request.app.copy_of:
-        make_async_build.delay(request.app)
+        make_async_build_v2.delay(request.app.get_id, request.app.domain, request.app.version)
     return HttpResponse(
         request.app.create_practice_user_restore()
     )
@@ -372,7 +374,7 @@ def download_index(request, domain, app_id):
     files = defaultdict(list)
     try:
         for file_ in source_files(request.app):
-            form_filename = re.search('modules-(\d+)\/forms-(\d+)', file_[0])
+            form_filename = re.search(r'modules-(\d+)\/forms-(\d+)', file_[0])
             if form_filename:
                 module_id, form_id = form_filename.groups()
                 module = request.app.get_module(module_id)
@@ -408,22 +410,19 @@ def download_index(request, domain, app_id):
             ),
             extra_tags='html'
         )
-    built_versions = get_all_built_app_ids_and_versions(domain, request.app.copy_of)
     enabled_build_profiles = []
-    if toggles.RELEASE_BUILDS_PER_PROFILE.enabled(domain):
-        enabled_build_profiles = get_enabled_build_profiles_for_version(request.app.get_id, request.app.version)
+    latest_enabled_build_profiles = {}
+    if request.app.is_released and toggles.RELEASE_BUILDS_PER_PROFILE.enabled(domain):
+        latest_enabled_build_profiles = get_latest_enabled_versions_per_profile(request.app.copy_of)
+        enabled_build_profiles = [_id for _id, version in latest_enabled_build_profiles.items()
+                                  if version == request.app.version]
 
     return render(request, "app_manager/download_index.html", {
         'app': request.app,
-        'files': OrderedDict(sorted(six.iteritems(files), key=lambda x: x[0])),
+        'files': OrderedDict(sorted(six.iteritems(files), key=lambda x: x[0] or '')),
         'supports_j2me': request.app.build_spec.supports_j2me(),
-        'built_versions': [{
-            'app_id': _app_id,
-            'build_id': build_id,
-            'version': version,
-            'comment': comment,
-        } for _app_id, build_id, version, comment in built_versions],
-        'enabled_build_profiles': enabled_build_profiles
+        'enabled_build_profiles': enabled_build_profiles,
+        'latest_enabled_build_profiles': latest_enabled_build_profiles,
     })
 
 
@@ -476,7 +475,7 @@ def download_index_files(app, build_profile_id=None):
             # profile hasnt been built yet
             app.create_build_files(build_profile_id=build_profile_id)
             app.save()
-        files = [(path[len(prefix):], app.fetch_attachment(path, return_bytes=True))
+        files = [(path[len(prefix):], app.fetch_attachment(path))
                  for path in app.blobs if needed_for_CCZ(path)]
     else:
         files = list(app.create_all_files().items())

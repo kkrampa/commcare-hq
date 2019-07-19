@@ -14,7 +14,7 @@ from corehq import toggles
 from corehq.apps.app_manager.dbaccessors import get_app, wrap_app, get_apps_in_domain, get_current_app
 from corehq.apps.app_manager.decorators import require_deploy_apps
 from corehq.apps.app_manager.exceptions import AppEditingError, \
-    ModuleNotFoundException, FormNotFoundException, AppLinkError
+    ModuleNotFoundException, FormNotFoundException, AppLinkError, MultimediaMissingError
 from corehq.apps.app_manager.models import Application, ReportModule, enable_usercase_if_necessary, CustomIcon
 from corehq.apps.es import FormES
 from corehq.apps.hqwebapp.tasks import send_html_email_async
@@ -115,6 +115,10 @@ def get_langs(request, app):
     return lang, langs
 
 
+def set_lang_cookie(response, lang):
+    response.set_cookie('lang', encode_if_unicode(lang))
+
+
 def bail(request, domain, app_id, not_found=""):
     if not_found:
         messages.error(request, 'Oops! We could not find that %s. Please try again' % not_found)
@@ -128,7 +132,7 @@ def encode_if_unicode(s):
 
 
 def validate_langs(request, existing_langs):
-    o = json.loads(request.body)
+    o = json.loads(request.body.decode('utf-8'))
     langs = o['langs']
     rename = o['rename']
 
@@ -165,30 +169,29 @@ def overwrite_app(app, master_build, report_map=None):
     ])
     master_json = master_build.to_json()
     app_json = app.to_json()
-    id_map = _get_form_id_map(app_json)  # do this before we change the source
+    form_ids_by_xmlns = _get_form_ids_by_xmlns(app_json)  # do this before we change the source
 
     for key, value in six.iteritems(master_json):
         if key not in excluded_fields:
             app_json[key] = value
     app_json['version'] = master_json['version']
     wrapped_app = wrap_app(app_json)
-    for module in wrapped_app.modules:
-        if isinstance(module, ReportModule):
-            if report_map is not None:
-                for config in module.report_configs:
-                    try:
-                        config.report_id = report_map[config.report_id]
-                    except KeyError:
-                        raise AppEditingError(config.report_id)
-            else:
-                raise AppEditingError('Report map not passed to overwrite_app')
+    for module in wrapped_app.get_report_modules():
+        if report_map is None:
+            raise AppEditingError('Report map not passed to overwrite_app')
 
-    wrapped_app = _update_form_ids(wrapped_app, master_build, id_map)
+        for config in module.report_configs:
+            try:
+                config.report_id = report_map[config.report_id]
+            except KeyError:
+                raise AppEditingError(config.report_id)
+
+    wrapped_app = _update_form_ids(wrapped_app, master_build, form_ids_by_xmlns)
     enable_usercase_if_necessary(wrapped_app)
     return wrapped_app
 
 
-def _get_form_id_map(app):
+def _get_form_ids_by_xmlns(app):
     id_map = {}
     for module in app['modules']:
         for form in module['forms']:
@@ -196,7 +199,7 @@ def _get_form_id_map(app):
     return id_map
 
 
-def _update_form_ids(app, master_app, id_map):
+def _update_form_ids(app, master_app, form_ids_by_xmlns):
 
     _attachments = master_app.get_attachments()
 
@@ -204,7 +207,7 @@ def _update_form_ids(app, master_app, id_map):
     app_source.pop('external_blobs')
     app_source['_attachments'] = _attachments
 
-    updated_source = update_form_unique_ids(app_source, id_map)
+    updated_source = update_form_unique_ids(app_source, form_ids_by_xmlns)
 
     attachments = app_source.pop('_attachments')
     new_wrapped_app = wrap_app(updated_source)
@@ -294,7 +297,7 @@ def update_linked_app_and_notify(domain, app_id, user_id, email):
     subject = _("Update Status for linked app %s") % app.name
     try:
         update_linked_app(app, user_id)
-    except AppLinkError as e:
+    except (AppLinkError, MultimediaMissingError) as e:
         message = six.text_type(e)
     except Exception:
         # Send an email but then crash the process
@@ -322,7 +325,7 @@ def update_linked_app(app, user_id):
             'Unable to pull latest master from remote CommCare HQ. Please try again later.'
         ))
 
-    if master_version > app.version:
+    if app.version is None or master_version > app.version:
         try:
             latest_master_build = app.get_latest_master_release()
         except ActionNotPermitted:

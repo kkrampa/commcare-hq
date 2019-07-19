@@ -12,11 +12,11 @@ describe('App Releases', function () {
                     id: version,
                     version: version,
                     doc_type: 'Application',
-                    build_comment: '',
+                    query: '',
                     build_broken: false,
                     is_released: false,
                     domain: 'test-domain',
-                    target_commcare_flavor: false,
+                    commcare_flavor: null,
                 }, extraProps),
                 releasesMain));
         }
@@ -48,7 +48,7 @@ describe('App Releases', function () {
             registerUrl("download_multimedia_zip", "/a/test-domain/apps/download/---/multimedia/commcare.zip");
             ajax_stub = sinon.stub($, 'ajax');
             releases = releasesMainModel(options);
-            releases.savedApps(getSavedApps(releases.fetchLimit(), {}, releases));
+            releases.savedApps(getSavedApps(5, {}, releases));
         });
 
         afterEach(function () {

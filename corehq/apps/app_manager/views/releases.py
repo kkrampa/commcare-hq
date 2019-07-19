@@ -11,6 +11,7 @@ from django.http import HttpResponseRedirect
 from django_prbac.utils import has_privilege
 from django.views.generic import View
 from django.utils.decorators import method_decorator
+from django.core.exceptions import ValidationError
 
 from corehq.apps.app_manager.forms import PromptUpdateSettingsForm
 from corehq.apps.app_manager.tasks import create_build_files_for_all_app_profiles
@@ -30,7 +31,7 @@ from phonelog.models import UserErrorEntry
 
 from corehq import privileges, toggles
 from corehq.apps.accounting.utils import domain_has_privilege
-from corehq.apps.analytics.tasks import track_built_app_on_hubspot_v2
+from corehq.apps.analytics.tasks import track_built_app_on_hubspot
 from corehq.apps.analytics.tasks import track_workflow
 from corehq.apps.domain.dbaccessors import get_doc_count_in_domain_by_class
 from corehq.apps.domain.decorators import login_or_api_key, track_domain_request
@@ -44,26 +45,34 @@ from corehq.util.timezones.utils import get_timezone_for_user
 
 from corehq.apps.app_manager.dbaccessors import (
     get_app,
+    get_app_cached,
     get_built_app_ids_for_app_id,
     get_current_app_version,
     get_latest_build_id,
     get_latest_build_version,
     get_latest_released_app_version,
 )
-from corehq.apps.app_manager.models import BuildProfile, LatestEnabledBuildProfiles
-from corehq.apps.app_manager.const import DEFAULT_FETCH_LIMIT
+from corehq.apps.app_manager.models import (
+    BuildProfile,
+    LatestEnabledBuildProfiles,
+    AppReleaseByLocation,
+)
 from corehq.apps.users.models import CommCareUser
 from corehq.util.datadog.gauges import datadog_bucket_timer
 from corehq.util.view_utils import reverse
 from corehq.apps.app_manager.decorators import (
-    no_conflict_require_POST, require_can_edit_apps, require_deploy_apps)
+    no_conflict_require_POST,
+    require_can_edit_apps,
+    require_deploy_apps,
+)
 from corehq.apps.app_manager.exceptions import ModuleIdMissingException, PracticeUserException
 from corehq.apps.app_manager.models import Application, SavedAppBuild
 from corehq.apps.app_manager.views.download import source_files
 from corehq.apps.app_manager.views.settings import PromptSettingsUpdateView
 from corehq.apps.app_manager.views.utils import back_to_main, get_langs
 from corehq.apps.builds.models import CommCareBuildConfig
-from corehq.apps.es.apps import AppES
+from corehq.apps.es.apps import AppES, build_comment, version
+from corehq.apps.es import queries
 from corehq.apps.users.models import CouchUser
 import six
 
@@ -83,7 +92,7 @@ def _get_error_counts(domain, app_id, version_numbers):
 def paginate_releases(request, domain, app_id):
     limit = request.GET.get('limit')
     only_show_released = json.loads(request.GET.get('only_show_released', 'false'))
-    build_comment = request.GET.get('build_comment')
+    query = request.GET.get('query')
     page = int(request.GET.get('page', 1))
     page = max(page, 1)
     try:
@@ -101,11 +110,13 @@ def paginate_releases(request, domain, app_id):
             descending=True,
             limit=limit,
             skip=skip,
-            wrapper=lambda x: SavedAppBuild.wrap(x['value'],
-                                                 scrap_old_conventions=False).releases_list_json(timezone),
+            wrapper=lambda x: (
+                SavedAppBuild.wrap(x['value'], scrap_old_conventions=False)
+                .releases_list_json(timezone)
+            ),
         ).all()
 
-    if not bool(only_show_released or build_comment):
+    if not bool(only_show_released or query):
         # If user is limiting builds by released status or build comment, it's much
         # harder to be performant with couch. So if they're not doing so, take shortcuts.
         total_apps = len(get_built_app_ids_for_app_id(domain, app_id))
@@ -122,26 +133,22 @@ def paginate_releases(request, domain, app_id):
         )
         if only_show_released:
             app_es = app_es.is_released()
-        if build_comment:
-            app_es = app_es.build_comment(build_comment)
+        if query:
+            app_es = app_es.add_query(build_comment(query), queries.SHOULD)
+            try:
+                app_es = app_es.add_query(version(int(query)), queries.SHOULD)
+            except ValueError:
+                pass
+
         results = app_es.exclude_source().run()
+        total_apps = results.total
         app_ids = results.doc_ids
         apps = get_docs(Application.get_db(), app_ids)
+
         saved_apps = [
             SavedAppBuild.wrap(app, scrap_old_conventions=False).releases_list_json(timezone)
             for app in apps
         ]
-        total_apps = results.total
-
-    j2me_enabled_configs = CommCareBuildConfig.j2me_enabled_config_labels()
-    for app in saved_apps:
-        app['include_media'] = app['doc_type'] != 'RemoteApp'
-        app['j2me_enabled'] = app['menu_item_label'] in j2me_enabled_configs
-        app['target_commcare_flavor'] = (
-            SavedAppBuild.get(app['_id']).target_commcare_flavor
-            if toggles.TARGET_COMMCARE_FLAVOR.enabled(domain)
-            else 'none'
-        )
 
     if toggles.APPLICATION_ERROR_REPORT.enabled(request.couch_user.username):
         versions = [app['version'] for app in saved_apps]
@@ -157,6 +164,7 @@ def paginate_releases(request, domain, app_id):
             'total': total_apps,
             'num_pages': num_pages,
             'current_page': page,
+            'more': page * limit < total_apps,  # needed when select2 uses this endpoint
         }
     })
 
@@ -180,7 +188,6 @@ def get_releases_context(request, domain, app_id):
         'build_profile_access': build_profile_access,
         'application_profile_url': reverse(LanguageProfilesView.urlname, args=[domain, app_id]),
         'lastest_j2me_enabled_build': CommCareBuildConfig.latest_j2me_enabled_config().label,
-        'fetchLimit': request.GET.get('limit', DEFAULT_FETCH_LIMIT),
         'latest_build_id': get_latest_build_id(domain, app_id),
         'prompt_settings_url': reverse(PromptSettingsUpdateView.urlname, args=[domain, app_id]),
         'prompt_settings_form': prompt_settings_form,
@@ -231,8 +238,10 @@ def current_app_version(request, domain, app_id):
 def release_build(request, domain, app_id, saved_app_id):
     is_released = request.POST.get('is_released') == 'true'
     if not is_released:
-        if LatestEnabledBuildProfiles.objects.filter(build_id=saved_app_id).exists():
-            return json_response({'error': _('Please disable any enabled profiles to un-release this build.')})
+        if (LatestEnabledBuildProfiles.objects.filter(build_id=saved_app_id, active=True).exists() or
+                AppReleaseByLocation.objects.filter(build_id=saved_app_id, active=True).exists()):
+            return json_response({'error': _('Please disable any enabled profiles/location restriction '
+                                             'to un-release this build.')})
     ajax = request.POST.get('ajax') == 'true'
     saved_app = get_app(domain, saved_app_id)
     if saved_app.copy_of != app_id:
@@ -265,7 +274,7 @@ def save_copy(request, domain, app_id):
     See VersionedDoc.save_copy
 
     """
-    track_built_app_on_hubspot_v2.delay(request.couch_user)
+    track_built_app_on_hubspot.delay(request.couch_user)
     comment = request.POST.get('comment')
     app = get_app(domain, app_id)
     try:
@@ -300,10 +309,6 @@ def save_copy(request, domain, app_id):
         get_timezone_for_user(request.couch_user, domain)
     )
     lang, langs = get_langs(request, app)
-    if copy:
-        # Set if build is supported for Java Phones
-        j2me_enabled_configs = CommCareBuildConfig.j2me_enabled_config_labels()
-        copy['j2me_enabled'] = copy['menu_item_label'] in j2me_enabled_configs
 
     return json_response({
         "saved_app": copy,
@@ -336,20 +341,30 @@ def revert_to_copy(request, domain, app_id):
 
     """
     app = get_app(domain, app_id)
-    copy = get_app(domain, request.POST['saved_app'])
+    copy = get_app(domain, request.POST['build_id'])
+    if copy.get_doc_type() == 'LinkedApplication' and app.get_doc_type() == 'Application':
+        copy.convert_to_application()
     app = app.make_reversion_to_copy(copy)
     app.save()
     messages.success(
         request,
-        "Successfully reverted to version %s, now at version %s" % (copy.version, app.version)
+        _("Successfully reverted to version %(old_version)s, now at version %(new_version)s") % {
+            'old_version': copy.version,
+            'new_version': app.version,
+        }
     )
+    copy_build_comment_params = {
+        "old_version": copy.version,
+        "original_comment": copy.build_comment,
+    }
     if copy.build_comment:
-        new_build_comment = "Reverted to version {old_version}\n\n{original_comment}".format(
-            old_version=copy.version, original_comment=copy.build_comment)
+        copy_build_comment_template = _(
+            "Reverted to version {old_version}\n\nPrevious build comments:\n{original_comment}")
     else:
-        new_build_comment = "Reverted to version {old_version}".format(old_version=copy.version)
+        copy_build_comment_template = _("Reverted to version {old_version}")
+
     copy = app.make_build(
-        comment=new_build_comment,
+        comment=copy_build_comment_template.format(**copy_build_comment_params),
         user_id=request.couch_user.get_id,
     )
     copy.save(increment_version=False)
@@ -548,7 +563,7 @@ class LanguageProfilesView(View):
         return super(LanguageProfilesView, self).dispatch(request, *args, **kwargs)
 
     def post(self, request, domain, app_id, *args, **kwargs):
-        profiles = json.loads(request.body).get('profiles')
+        profiles = json.loads(request.body.decode('utf-8')).get('profiles')
         app = get_app(domain, app_id)
         build_profiles = {}
         if profiles:
@@ -582,50 +597,21 @@ class LanguageProfilesView(View):
 
 @require_can_edit_apps
 def toggle_build_profile(request, domain, build_id, build_profile_id):
-    build = Application.get(build_id)
-    action = request.GET.get('action')
-    if action and action == 'enable' and not build.is_released:
-        messages.error(request, _("Release the build first. Can not enable profiles for unreleased versions"))
-        return HttpResponseRedirect(reverse('download_index', args=[domain, build_id]))
-    latest_enabled_build_profile = LatestEnabledBuildProfiles.objects.filter(
-        app_id=build.copy_of,
-        build_profile_id=build_profile_id
-    ).order_by('-version').first()
-    if action == 'enable' and latest_enabled_build_profile:
-        if latest_enabled_build_profile.version > build.version:
-            messages.error(request, _(
-                "Latest version available for this profile is {}, which is "
-                "higher than this version. Disable any higher versions first.".format(
-                    latest_enabled_build_profile.version
-                )))
-            return HttpResponseRedirect(reverse('download_index', args=[domain, build_id]))
-    if action == 'enable':
-        build_profile = LatestEnabledBuildProfiles.objects.create(
-            app_id=build.copy_of,
-            version=build.version,
-            build_profile_id=build_profile_id,
-            build_id=build_id
-        )
-        build_profile.expire_cache(domain)
-    elif action == 'disable':
-        build_profile = LatestEnabledBuildProfiles.objects.filter(
-            app_id=build.copy_of,
-            version=build.version,
-            build_profile_id=build_profile_id,
-            build_id=build_id
-        ).first()
-        build_profile.delete()
-        build_profile.expire_cache(domain)
-    latest_enabled_build_profile = LatestEnabledBuildProfiles.objects.filter(
-        app_id=build.copy_of,
-        build_profile_id=build_profile_id
-    ).order_by('-version').first()
-    if latest_enabled_build_profile:
-        messages.success(request, _("Latest version for profile {} is now {}").format(
-            build.build_profiles[build_profile_id].name, latest_enabled_build_profile.version
-        ))
+    build = get_app_cached(request.domain, build_id)
+    status = request.GET.get('action') == 'enable'
+    try:
+        LatestEnabledBuildProfiles.update_status(build, build_profile_id, status)
+    except ValidationError as e:
+        messages.error(request, e)
     else:
-        messages.success(request, _("Latest release now available for profile {}").format(
-            build.build_profiles[build_profile_id].name
-        ))
+        latest_enabled_build_profile = LatestEnabledBuildProfiles.for_app_and_profile(
+            build.copy_of, build_profile_id)
+        if latest_enabled_build_profile:
+            messages.success(request, _("Latest version for profile {} is now {}").format(
+                build.build_profiles[build_profile_id].name, latest_enabled_build_profile.version
+            ))
+        else:
+            messages.success(request, _("Latest release now available for profile {}").format(
+                build.build_profiles[build_profile_id].name
+            ))
     return HttpResponseRedirect(reverse('download_index', args=[domain, build_id]))

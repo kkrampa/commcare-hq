@@ -37,7 +37,8 @@ Save those backups to somewhere you'll be able to access from the new environmen
 
 - Additional requirements:
   - [Homebrew](https://brew.sh)
-  - [libmagic](https://macappstore.org/libmagic)
+  - [libmagic](https://macappstore.org/libmagic) (available via homebrew)
+  - [pango](https://www.pango.org/) (available via homebrew)
 
 #### Setup virtualenv
 
@@ -65,9 +66,27 @@ Next, install the appropriate requirements (only one is necessary).
 * Minimum required packages
   * `$ pip install -r requirements/requirements.txt`
 
-(If this fails you may need to [install lxml's dependencies](https://stackoverflow.com/a/5178444/8207).)
+(If this fails you may need to [install lxml's dependencies](https://stackoverflow.com/a/5178444/8207) or pango.)
 
 Note that once you're up and running, you'll want to periodically re-run these steps, and a few others, to keep your environment up to date. Some developers have found it helpful to automate these tasks. For pulling code, instead of `git pull`, you can run [this script](https://github.com/dimagi/commcare-hq/blob/master/scripts/update-code.sh) to update all code, including submodules. [This script](https://github.com/dimagi/commcare-hq/blob/master/scripts/hammer.sh) will update all code and do a few more tasks like run migrations and update libraries, so it's good to run once a month or so, or when you pull code and then immediately hit an error.
+
+#### Setup for Python 3 (beta)
+
+- Install [Python 3.6](https://www.python.org/downloads/)
+    - For OSX, you can [install using Homebrew](http://osxdaily.com/2018/06/13/how-install-update-python-3x-mac/)
+    - For Ubuntu 18.04:
+
+          $ sudo apt install python3.6 python3.6-dev
+
+    - For Ubuntu < 18.04:
+
+          $ sudo add-apt-repository ppa:deadsnakes/ppa
+          $ sudo apt-get update
+          $ sudo apt-get install python3.6
+
+- [Create and activate virtualenv](https://docs.python.org/3/library/venv.html#creating-virtual-environments)
+- Install HQ requirements for Python 3.6
+    - `$ pip install -r requirements-python3/dev-requirements.txt`
 
 #### Setup localsettings
 
@@ -78,7 +97,6 @@ First create your `localsettings.py` file:
 
 Enter `localsettings.py` and do the following:
 - Find the `LOG_FILE` and `DJANGO_LOG_FILE` entries. Ensure that the directories for both exist and are writeable. If they do not exist, create them.
-- Find the `LOCAL_APPS` section and un-comment the line that starts with `'kombu.transport.django'`
 - You may also want to add the line `from dev_settings import *` at the top of the file, which includes some useful default settings.
 
 Create the shared directory.  If you have not modified `SHARED_DRIVE_ROOT`, then run:
@@ -220,10 +238,10 @@ Install LESS and UglifyJS:
 
 For all STATICFILES changes (primarily LESS and JavaScript), run:
 
-    $ manage.py collectstatic
-    $ manage.py compilejsi18n
-    $ manage.py fix_less_imports_collectstatic
-    $ manage.py compress
+    $ ./manage.py collectstatic
+    $ ./manage.py compilejsi18n
+    $ ./manage.py fix_less_imports_collectstatic
+    $ ./manage.py compress
 
 
 #### Formplayer
@@ -298,11 +316,8 @@ Then run the following separately:
     # Keeps elasticsearch index in sync
     $ ./manage.py run_ptop --all
 
-    # Setting up the asynchronous task scheduler (only required if you have CELERY_ALWAYS_EAGER=False in settings)
-    # For Mac / Linux
-    $ ./manage.py celeryd --verbosity=2 --beat --statedb=celery.db --events
-    # Windows
-    > manage.py celeryd --settings=settings
+    # Setting up the asynchronous task scheduler (only required if you have CELERY_TASK_ALWAYS_EAGER=False in settings)
+    $ celery -A corehq worker -l info
 
 Create a superuser for your local environment
 
@@ -317,7 +332,7 @@ By default, HQ uses vellum minified build files to render form-designer. To use 
 VELLUM_DEBUG = "dev"
 ```
 
-    # simlink your Vellum code to submodules/formdesigner
+    # symlink your Vellum code to submodules/formdesigner
     $ ln -s absolute/path/to/Vellum absolute/path/to/submodules/formdesigner/
 
 Running Tests

@@ -147,7 +147,7 @@ class PactFormAPI(DomainAPI):
 #                    continue
                 try:
                     xml_str = (BlobHelper(data_row, db, CODES.form_xml)
-                        .fetch_attachment('form.xml', return_bytes=True).decode('utf-8')
+                        .fetch_attachment('form.xml').decode('utf-8')
                         .replace("<?xml version=\'1.0\' ?>", '')
                         .replace("<?xml version='1.0' encoding='UTF-8' ?>", ''))
                     yield xml_str
@@ -236,7 +236,7 @@ def submit_case_update_form(casedoc, update_dict, couch_user, submit_date=None, 
     encounter_date = etree.XML('<encounter_date>%s</encounter_date>' % json_format_date(datetime.utcnow()))
     form.append(encounter_date)
 
-    submission_xml_string = etree.tostring(form)
+    submission_xml_string = etree.tostring(form).decode('utf-8')
     if sync_token:
         extra_meta = {LAST_SYNCTOKEN_HEADER: sync_token}
     else:
@@ -421,5 +421,5 @@ class PactAPI(DomainAPI):
     def dispatch(self, *args, **kwargs):
         req = args[0]
         self.method = req.GET.get('method', None)
-        ret =  super(PactAPI, self).dispatch(*args, **kwargs)
+        ret = super(PactAPI, self).dispatch(*args, **kwargs)
         return ret

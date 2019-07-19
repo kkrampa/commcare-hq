@@ -34,6 +34,7 @@ from soil.progress import set_task_progress
 from corehq.apps.export.esaccessors import get_ledger_section_entry_combinations
 from corehq.apps.locations.models import SQLLocation
 from corehq.apps.reports.daterange import get_daterange_start_end_dates
+from corehq.util.python_compatibility import soft_assert_type_text
 from corehq.util.timezones.utils import get_timezone_for_domain
 from memoized import memoized
 from couchdbkit import (
@@ -149,6 +150,9 @@ class PathNode(DocumentSchema):
     def __eq__(self, other):
         return self.__key() == other.__key()
 
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
     def __hash__(self):
         return hash(self.__key())
 
@@ -193,6 +197,9 @@ class ExportItem(DocumentSchema, ReadablePathMixin):
 
     def __eq__(self, other):
         return self.__key() == other.__key()
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
 
     @classmethod
     def wrap(cls, data):
@@ -648,13 +655,13 @@ class ExportInstanceFilters(DocumentSchema):
 
 class CaseExportInstanceFilters(ExportInstanceFilters):
     sharing_groups = ListProperty(StringProperty)
-    show_all_data = BooleanProperty(default=True)
-    show_project_data = BooleanProperty()
+    show_all_data = BooleanProperty()
+    show_project_data = BooleanProperty(default=True)
     show_deactivated_data = BooleanProperty()
 
 
 class FormExportInstanceFilters(ExportInstanceFilters):
-    user_types = ListProperty(IntegerProperty, default=[HQUserType.ACTIVE])
+    user_types = ListProperty(IntegerProperty, default=[HQUserType.ACTIVE, HQUserType.DEACTIVATED])
 
 
 class ExportInstance(BlobMixin, Document):
@@ -666,7 +673,7 @@ class ExportInstance(BlobMixin, Document):
     name = StringProperty()
     domain = StringProperty()
     tables = ListProperty(TableConfiguration)
-    export_format = StringProperty(default='csv')
+    export_format = StringProperty(default='xlsx')
     app_id = StringProperty()
 
     # The id of the schema that was used to generate the instance.
@@ -685,6 +692,8 @@ class ExportInstance(BlobMixin, Document):
     # Keep reference to old schema id if we have converted it from the legacy infrastructure
     legacy_saved_export_schema_id = StringProperty()
 
+    is_odata_config = BooleanProperty(default=False)
+
     is_daily_saved_export = BooleanProperty(default=False)
     auto_rebuild_enabled = BooleanProperty(default=True)
 
@@ -702,6 +711,15 @@ class ExportInstance(BlobMixin, Document):
 
     class Meta(object):
         app_label = 'export'
+
+    @classmethod
+    def wrap(cls, data):
+        from corehq.apps.export.views.utils import clean_odata_columns, remove_row_number_from_export_columns
+        export_instance = super(ExportInstance, cls).wrap(data)
+        if export_instance.is_odata_config:
+            clean_odata_columns(export_instance)
+            remove_row_number_from_export_columns(export_instance)
+        return export_instance
 
     @property
     def is_safe(self):
@@ -1019,6 +1037,17 @@ class CaseExportInstance(ExportInstance):
     # filters are only used in daily saved and HTML (dashboard feed) exports
     filters = SchemaProperty(CaseExportInstanceFilters)
 
+    @classmethod
+    def wrap(cls, data):
+        export_instance = super(CaseExportInstance, cls).wrap(data)
+        if export_instance.is_odata_config:
+            for table in export_instance.tables:
+                for column in table.columns:
+                    if not column.item.transform and [path_node.name for path_node in column.item.path] == ['_id']:
+                        column.label = 'caseid'
+                        column.selected = True
+        return export_instance
+
     @property
     def identifier(self):
         return self.case_type
@@ -1070,6 +1099,19 @@ class FormExportInstance(ExportInstance):
     # static filters to limit the data in this export
     # filters are only used in daily saved and HTML (dashboard feed) exports
     filters = SchemaProperty(FormExportInstanceFilters)
+
+    @classmethod
+    def wrap(cls, data):
+        export_instance = super(FormExportInstance, cls).wrap(data)
+        if export_instance.is_odata_config:
+            for table in export_instance.tables:
+                for column in table.columns:
+                    if not column.item.transform and (
+                        [path_node.name for path_node in column.item.path] == ['form', 'meta', 'instanceID']
+                    ):
+                        column.label = 'formid'
+                        column.selected = True
+        return export_instance
 
     @property
     def identifier(self):
@@ -1635,7 +1677,7 @@ class ExportDataSchema(Document):
     def record_update(self, app_id, app_version):
         self.last_app_versions[app_id] = max(
             self.last_app_versions.get(app_id, 0),
-            app_version,
+            app_version or 0,
         )
 
     @staticmethod
@@ -2284,6 +2326,8 @@ class SplitUserDefinedExportColumn(ExportColumn):
 
         if not isinstance(value, six.string_types):
             return [None] * len(self.user_defined_options) + [value]
+        else:
+            soft_assert_type_text(value)
 
         selected = OrderedDict((x, 1) for x in value.split(" "))
         row = []
@@ -2369,6 +2413,8 @@ class SplitGPSExportColumn(ExportColumn):
 
         if not isinstance(value, six.string_types):
             return values
+        else:
+            soft_assert_type_text(value)
 
         for index, coordinate in enumerate(value.split(' ')):
             values[index] = coordinate
@@ -2420,6 +2466,8 @@ class SplitExportColumn(ExportColumn):
         if not isinstance(value, six.string_types):
             unspecified_options = [] if self.ignore_unspecified_options else [value]
             return [EMPTY_VALUE] * len(self.item.options) + unspecified_options
+        else:
+            soft_assert_type_text(value)
 
         selected = OrderedDict((x, 1) for x in value.split(" "))
         row = []

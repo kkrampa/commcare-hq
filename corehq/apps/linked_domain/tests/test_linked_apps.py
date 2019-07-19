@@ -17,14 +17,15 @@ from corehq.apps.linked_domain.models import DomainLink, RemoteLinkDetails
 from corehq.apps.linked_domain.remote_accessors import _convert_app_from_remote_linking_source, \
     _get_missing_multimedia, _fetch_remote_media
 from corehq.apps.app_manager.tests.util import TestXmlMixin
-from corehq.apps.app_manager.views.utils import overwrite_app, _get_form_id_map, update_linked_app
+from corehq.apps.app_manager.views.utils import overwrite_app, _get_form_ids_by_xmlns, update_linked_app
 from corehq.apps.hqmedia.models import CommCareImage, CommCareMultimedia
 from corehq.apps.linked_domain.util import convert_app_for_remote_linking
 from io import open
 
-from corehq.util.test_utils import softer_assert
+from corehq.util.test_utils import flag_enabled, softer_assert
 
 
+@flag_enabled('CAUTIOUS_MULTIMEDIA')
 class BaseLinkedAppsTest(TestCase, TestXmlMixin):
     file_path = ('data',)
 
@@ -78,12 +79,12 @@ class TestLinkedApps(BaseLinkedAppsTest):
         module = self.linked_app.add_module(Module.new_module('M1', None))
         module.new_form('f1', None, self.get_xml('very_simple_form').decode('utf-8'))
 
-        id_map_before = _get_form_id_map(self.linked_app)
+        id_map_before = _get_form_ids_by_xmlns(self.linked_app)
 
         overwrite_app(self.linked_app, self.plain_master_app, {})
         self.assertEqual(
             id_map_before,
-            _get_form_id_map(LinkedApplication.get(self.linked_app._id))
+            _get_form_ids_by_xmlns(LinkedApplication.get(self.linked_app._id))
         )
 
     def test_get_master_version(self):
@@ -178,7 +179,10 @@ class TestLinkedApps(BaseLinkedAppsTest):
         self.assertEqual(self.linked_app.linked_app_translations, translations)
         self.assertEqual(self.linked_app.translations, translations)
 
-    def test_override_logo(self):
+    @patch('corehq.apps.app_manager.models.get_and_assert_practice_user_in_domain', lambda x, y: None)
+    def test_overrides(self):
+        self.plain_master_app.practice_mobile_worker_id = "123456"
+        self.plain_master_app.save()
         image_data = _get_image_data()
         image = CommCareImage.get_by_data(image_data)
         image.attach_data(image_data, original_filename='logo.png')
@@ -218,7 +222,11 @@ class TestLinkedApps(BaseLinkedAppsTest):
 
         self.linked_app.linked_app_logo_refs = logo_refs
         self.linked_app.create_mapping(image, image_path, save=False)
+        self.linked_app.linked_app_attrs = {
+            'target_commcare_flavor': 'commcare_lts',
+        }
         self.linked_app.save()
+        self.linked_app.practice_mobile_worker_id = 'abc123456def'
         self.assertEqual(self.linked_app.logo_refs, {})
 
         update_linked_app(self.linked_app, 'test_override_logos')
@@ -228,9 +236,15 @@ class TestLinkedApps(BaseLinkedAppsTest):
         self.assertEqual(self.plain_master_app.logo_refs, {})
         self.assertEqual(self.linked_app.linked_app_logo_refs, logo_refs)
         self.assertEqual(self.linked_app.logo_refs, logo_refs)
-
-        # cleanup the linked app logo properties
+        self.assertEqual(self.linked_app.commcare_flavor, 'commcare_lts')
+        self.assertEqual(self.linked_app.linked_app_attrs, {
+            'target_commcare_flavor': 'commcare_lts',
+        })
+        self.assertEqual(self.plain_master_app.practice_mobile_worker_id, '123456')
+        self.assertEqual(self.linked_app.practice_mobile_worker_id, 'abc123456def')
+        # cleanup the linked app properties
         self.linked_app.linked_app_logo_refs = {}
+        self.linked_app.linked_app_attrs = {}
         self.linked_app.save()
 
 
@@ -256,8 +270,8 @@ class TestRemoteLinkedApps(BaseLinkedAppsTest):
         linked_app = _mock_pull_remote_master(
             self.master_app_with_report_modules, self.linked_app, {'master_report_id': 'mapped_id'}
         )
-        master_id_map = _get_form_id_map(self.master_app_with_report_modules)
-        linked_id_map = _get_form_id_map(linked_app)
+        master_id_map = _get_form_ids_by_xmlns(self.master_app_with_report_modules)
+        linked_id_map = _get_form_ids_by_xmlns(linked_app)
         for xmlns, master_form_id in master_id_map.items():
             linked_form_id = linked_id_map[xmlns]
             self.assertEqual(
@@ -313,7 +327,7 @@ class TestRemoteLinkedApps(BaseLinkedAppsTest):
 
         media = CommCareMultimedia.get(media_details['multimedia_id'])
         self.addCleanup(media.delete)
-        content = media.fetch_attachment(list(media.blobs.keys())[0], return_bytes=True)
+        content = media.fetch_attachment(list(media.blobs.keys())[0])
         self.assertEqual(data, content)
 
 

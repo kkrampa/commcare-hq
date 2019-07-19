@@ -11,7 +11,7 @@ import six
 from io import open
 
 from corehq.apps.app_manager.util import app_doc_types
-
+from corehq.util.python_compatibility import soft_assert_type_text
 
 PROFILE_SETTINGS_TO_TRANSLATE = [
     'name',
@@ -31,6 +31,8 @@ def _translate_setting(setting, prop):
     if not isinstance(value, six.string_types):
         return [ugettext(v) for v in value]
     else:
+        if six.PY3:
+            soft_assert_type_text(value)
         return ugettext(value)
 
 
@@ -38,13 +40,13 @@ def _load_custom_commcare_settings():
     path = os.path.join(os.path.dirname(__file__), 'static', 'app_manager', 'json')
     settings = []
     with open(os.path.join(path, 'commcare-profile-settings.yaml'), encoding='utf-8') as f:
-        for setting in yaml.load(f):
+        for setting in yaml.safe_load(f):
             if not setting.get('type'):
                 setting['type'] = 'properties'
             settings.append(setting)
 
     with open(os.path.join(path, 'commcare-app-settings.yaml'), encoding='utf-8') as f:
-        for setting in yaml.load(f):
+        for setting in yaml.safe_load(f):
             if not setting.get('type'):
                 setting['type'] = 'hq'
             settings.append(setting)
@@ -58,15 +60,17 @@ def _load_custom_commcare_settings():
     return settings
 
 
-def _load_commcare_settings_layout(doc_type):
+def _load_commcare_settings_layout(app):
     settings = dict([
         ('{0}.{1}'.format(setting.get('type'), setting.get('id')), setting)
         for setting in _load_custom_commcare_settings()
     ])
     path = os.path.join(os.path.dirname(__file__), 'static', 'app_manager', 'json')
     with open(os.path.join(path, 'commcare-settings-layout.yaml'), encoding='utf-8') as f:
-        layout = yaml.load(f)
+        layout = yaml.safe_load(f)
 
+    doc_type = app.get_doc_type()
+    j2me_section_ids = ['app-settings-j2me-properties', 'app-settings-j2me-ui']
     for section in layout:
         # i18n; not statically analyzable
         section['title'] = ugettext_noop(section['title'])
@@ -91,6 +95,9 @@ def _load_commcare_settings_layout(doc_type):
                 if prop in setting:
                     setting[prop] = _translate_setting(setting, prop)
 
+        if not app.build_spec.supports_j2me() and section['id'] in j2me_section_ids:
+            section['always_show'] = False
+
     if settings:
         raise Exception(
             "CommCare settings layout should mention "
@@ -108,9 +115,10 @@ def get_custom_commcare_settings():
 
 
 @memoized
-def get_commcare_settings_layout(doc_type):
+def get_commcare_settings_layout(app):
+    doc_type = app.get_doc_type()
     if doc_type in app_doc_types():
-        return _load_commcare_settings_layout(doc_type)
+        return _load_commcare_settings_layout(app)
     raise Exception("Unexpected doc_type received: %s" % doc_type)
 
 
@@ -123,7 +131,7 @@ def get_commcare_settings_lookup():
 
 
 def parse_condition_string(condition_str):
-    pattern = re.compile("{(?P<type>[\w-]+?)\.(?P<id>[\w-]+?)}=(?P<equals>true|false|'[\w-]+')")
+    pattern = re.compile(r"{(?P<type>[\w-]+?)\.(?P<id>[\w-]+?)}=(?P<equals>true|false|'[\w-]+')")
     match = pattern.match(condition_str).groupdict()
     if match["equals"] == 'true':
         match["equals"] = True

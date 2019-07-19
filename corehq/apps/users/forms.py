@@ -2,14 +2,14 @@ from __future__ import absolute_import
 from __future__ import unicode_literals
 from django.conf import settings
 from django.contrib.auth.forms import SetPasswordForm
-from crispy_forms.bootstrap import StrictButton
+from crispy_forms.bootstrap import InlineField, StrictButton
 from crispy_forms.helper import FormHelper
 from crispy_forms import layout as crispy
 from crispy_forms.layout import Fieldset, Layout, Submit
 import datetime
 import json
 
-from corehq.apps.hqwebapp.widgets import Select2AjaxV4
+from corehq.apps.hqwebapp.widgets import Select2Ajax
 from dimagi.utils.django.fields import TrimmedCharField
 from django import forms
 from django.core.exceptions import ValidationError
@@ -28,6 +28,7 @@ from corehq.apps.domain.forms import EditBillingAccountInfoForm, clean_password
 from corehq.apps.domain.models import Domain
 from corehq.apps.locations.models import SQLLocation
 from corehq.apps.locations.permissions import user_can_access_location_id
+from corehq.util.python_compatibility import soft_assert_type_text
 from custom.nic_compliance.forms import EncodedPasswordChangeFormMixin
 from corehq.apps.users.models import CouchUser, UserRole
 from corehq.apps.users.util import format_username, cc_user_domain
@@ -433,8 +434,10 @@ class CommCareAccountForm(forms.Form):
     Form for CommCareAccounts
     """
     username = forms.CharField(required=True)
-    password = forms.CharField(widget=PasswordInput(), required=True, min_length=1)
-    password_2 = forms.CharField(label='Password (reenter)', widget=PasswordInput(), required=True, min_length=1)
+    password_1 = forms.CharField(label=ugettext_lazy('Password'), widget=PasswordInput(),
+                                 required=True, min_length=1)
+    password_2 = forms.CharField(label=ugettext_lazy('Password (reenter)'), widget=PasswordInput(),
+                                 required=True, min_length=1)
     phone_number = forms.CharField(
         max_length=80,
         required=False,
@@ -455,7 +458,7 @@ class CommCareAccountForm(forms.Form):
             Fieldset(
                 _("Mobile Worker's Primary Information"),
                 'username',
-                'password',
+                'password_1',
                 'password_2',
                 'phone_number',
             )
@@ -469,7 +472,7 @@ class CommCareAccountForm(forms.Form):
 
     def clean_phone_number(self):
         phone_number = self.cleaned_data['phone_number']
-        phone_number = re.sub('\s|\+|\-', '', phone_number)
+        phone_number = re.sub(r'\s|\+|\-', '', phone_number)
         if phone_number == '':
             return None
         elif not re.match(r'\d+$', phone_number):
@@ -478,12 +481,12 @@ class CommCareAccountForm(forms.Form):
 
     def clean(self):
         try:
-            password = self.cleaned_data['password']
+            password_1 = self.cleaned_data['password_1']
             password_2 = self.cleaned_data['password_2']
         except KeyError:
             pass
         else:
-            if password != password_2:
+            if password_1 != password_2:
                 raise forms.ValidationError("Passwords do not match")
 
         return self.cleaned_data
@@ -491,46 +494,28 @@ class CommCareAccountForm(forms.Form):
 validate_username = EmailValidator(message=ugettext_lazy('Username contains invalid characters.'))
 
 
-_username_help = """
-<span ng-if="usernameAvailabilityStatus === 'pending'">
-    <i class="fa fa-circle-o-notch fa-spin"></i>
-    %(checking)s
-</span>
-<span ng-if="usernameAvailabilityStatus === 'taken'"
-      style="word-wrap:break-word;">
-    <i class="fa fa-remove"></i>
-    {{ usernameStatusMessage }}
-</span>
-<span ng-if="usernameAvailabilityStatus === 'available'"
-      style="word-wrap:break-word;">
-    <i class="fa fa-check"></i>
-    {{ usernameStatusMessage }}
-</span>
-<span ng-if="usernameAvailabilityStatus === 'warning'">
-    <i class="fa fa-exclamation-triangle"></i>
-    {{ usernameStatusMessage }}
-</span>
-<span ng-if="usernameAvailabilityStatus === 'error'">
-    <i class="fa fa-exclamation-triangle"></i>
-    %(server_error)s
-</span>
-""" % {
-    'checking': ugettext_noop('Checking Availability...'),
-    'server_error': ugettext_noop('Issue connecting to server. Check Internet connection.')
-}
-
-
 class NewMobileWorkerForm(forms.Form):
     username = forms.CharField(
         max_length=50,
         required=True,
-        help_text=_username_help,
+        help_text="""
+            <span data-bind="visible: $root.usernameAvailabilityStatus() !== $root.STATUS.NONE">
+                <i class="fa fa-circle-o-notch fa-spin"
+                   data-bind="visible: $root.usernameAvailabilityStatus() === $root.STATUS.PENDING"></i>
+                <i class="fa fa-check"
+                   data-bind="visible: $root.usernameAvailabilityStatus() === $root.STATUS.SUCCESS"></i>
+                <i class="fa fa-exclamation-triangle"
+                   data-bind="visible: $root.usernameAvailabilityStatus() === $root.STATUS.WARNING ||
+                                       $root.usernameAvailabilityStatus() === $root.STATUS.ERROR"></i>
+                <!-- ko text: $root.usernameStatusMessage --><!-- /ko -->
+            </span>
+        """,
         label=ugettext_noop("Username"),
     )
     first_name = forms.CharField(
         max_length=30,
         required=False,
-        label=ugettext_noop("First Name")
+        label=ugettext_noop("First Name"),
     )
     last_name = forms.CharField(
         max_length=30,
@@ -541,7 +526,7 @@ class NewMobileWorkerForm(forms.Form):
         label=ugettext_noop("Location"),
         required=False,
     )
-    password = forms.CharField(
+    new_password = forms.CharField(
         widget=forms.PasswordInput(),
         required=True,
         min_length=1,
@@ -560,32 +545,24 @@ class NewMobileWorkerForm(forms.Form):
             self.fields['location_id'].required = True
 
         if self.project.strong_mobile_passwords:
-            if settings.ENABLE_DRACONIAN_SECURITY_FEATURES:
-                validator = "validate_password_draconian"
-            else:
-                validator = "validate_password_standard"
-            self.fields['password'].widget = forms.TextInput(attrs={
-                validator: "",
-                "ng_keydown": "markNonDefault()",
-                "class": "default",
-            })
-            self.fields['password'].help_text = mark_safe_lazy(string_concat('<i class="fa fa-warning"></i>',
+            # Use normal text input so auto-generated strong password is visible
+            self.fields['new_password'].widget = forms.TextInput()
+            self.fields['new_password'].help_text = mark_safe_lazy(string_concat('<i class="fa fa-warning"></i>',
                 ugettext_lazy('This password is automatically generated. Please copy it or create your own. It will not be shown again.'),
                 '<br />'
             ))
 
         if project.uses_locations:
-            self.fields['location_id'].widget = AngularLocationSelectWidget(
-                require=not self.can_access_all_locations)
+            self.fields['location_id'].widget = forms.Select()
             location_field = crispy.Field(
                 'location_id',
-                ng_model='mobileWorker.location_id',
+                data_bind='value: location_id',
             )
         else:
             location_field = crispy.Hidden(
                 'location_id',
                 '',
-                ng_model='mobileWorker.location_id',
+                data_bind='value: location_id',
             )
 
         self.helper = HQModalFormHelper()
@@ -593,40 +570,78 @@ class NewMobileWorkerForm(forms.Form):
         self.helper.layout = Layout(
             Fieldset(
                 _('Basic Information'),
-                crispy.Field(
-                    'username',
-                    ng_required="true",
-                    validate_username="",
-                    # What this says is, update as normal or when the element
-                    # loses focus. If the update is normal, wait 300 ms to
-                    # send the request again. If the update is on blur,
-                    # send the request.
-                    ng_model_options="{ "
-                                      " updateOn: 'default blur', "
-                                      " debounce: {'default': 300, 'blur': 0} "
-                                      "}",
-                    ng_model='mobileWorker.username',
-                    ng_maxlength=max_chars_username,
-                    maxlength=max_chars_username,
+                crispy.Div(
+                    crispy.Field(
+                        'username',
+                        data_bind="value: username, valueUpdate: 'keyup'",
+                        maxlength=max_chars_username,
+                    ),
+                    data_bind='''
+                        css: {
+                            'has-pending': $root.usernameAvailabilityStatus() === $root.STATUS.PENDING,
+                            'has-success': $root.usernameAvailabilityStatus() === $root.STATUS.SUCCESS,
+                            'has-warning': $root.usernameAvailabilityStatus() === $root.STATUS.WARNING,
+                            'has-error': $root.usernameAvailabilityStatus() === $root.STATUS.ERROR,
+                        },
+                    '''
                 ),
                 crispy.Field(
                     'first_name',
-                    ng_required="false",
-                    ng_model='mobileWorker.first_name',
-                    ng_maxlength="30",
+                    data_bind='value: first_name',
                 ),
                 crispy.Field(
                     'last_name',
-                    ng_required="false",
-                    ng_model='mobileWorker.last_name',
-                    ng_maxlength="30",
+                    data_bind='value: last_name',
                 ),
                 location_field,
-                crispy.Field(
-                    'password',
-                    ng_required="true",
-                    ng_model='mobileWorker.password',
-                    data_bind="value: password, valueUpdate: 'input'",
+                crispy.Div(
+                    hqcrispy.B3MultiField(
+                        _("Password"),
+                        InlineField(
+                            'new_password',
+                            data_bind="value: password, valueUpdate: 'input'",
+                        ),
+                        crispy.HTML('''
+                            <p class="help-block" data-bind="if: $root.isSuggestedPassword">
+                                <i class="fa fa-warning"></i> {suggested}
+                            </p>
+                            <p class="help-block" data-bind="ifnot: $root.isSuggestedPassword()">
+                                <!-- ko if: $root.passwordStatus() === $root.STATUS.SUCCESS -->
+                                    <i class="fa fa-check"></i> {strong}
+                                <!-- /ko -->
+                                <!-- ko ifnot: $root.useDraconianSecurity() -->
+                                    <!-- ko if: $root.passwordStatus() === $root.STATUS.WARNING -->
+                                        {almost}
+                                    <!-- /ko -->
+                                    <!-- ko if: $root.passwordStatus() === $root.STATUS.ERROR -->
+                                        <i class="fa fa-warning"></i> {weak}
+                                    <!-- /ko -->
+                                <!-- /ko -->
+
+                                <!-- ko if: $root.useDraconianSecurity() -->
+                                    <!-- ko if: $root.passwordStatus() === $root.STATUS.ERROR -->
+                                        <i class="fa fa-warning"></i> {rules}
+                                    <!-- /ko -->
+                                <!-- /ko -->
+                            </p>
+                        '''.format(
+                            suggested=_("This password is automatically generated. Please copy it or create "
+                                "your own. It will not be shown again."),
+                            strong=_("Good Job! Your password is strong!"),
+                            almost=_("Your password is almost strong enough! Try adding numbers or symbols!"),
+                            weak=_("Your password is too weak! Try adding numbers or symbols!"),
+                            rules=_("Password Requirements: 1 special character, 1 number, 1 capital letter, "
+                                "minimum length of 8 characters."),
+                        )),
+                        required=True,
+                    ),
+                    data_bind='''
+                        css: {
+                            'has-success': $root.passwordStatus() === $root.STATUS.SUCCESS,
+                            'has-warning': $root.passwordStatus() === $root.STATUS.WARNING,
+                            'has-error': $root.passwordStatus() === $root.STATUS.ERROR,
+                        }
+                    '''
                 ),
             )
         )
@@ -643,8 +658,8 @@ class NewMobileWorkerForm(forms.Form):
             raise forms.ValidationError("The username %s is reserved for CommCare." % username)
         return clean_mobile_worker_username(self.domain, username)
 
-    def clean_password(self):
-        cleaned_password = decode_password(self.cleaned_data.get('password'))
+    def clean_new_password(self):
+        cleaned_password = decode_password(self.cleaned_data.get('new_password'))
         if self.project.strong_mobile_passwords:
             return clean_password(cleaned_password)
         return cleaned_password
@@ -654,7 +669,7 @@ class GroupMembershipForm(forms.Form):
     selected_ids = forms.Field(
         label=ugettext_lazy("Group Membership"),
         required=False,
-        widget=Select2AjaxV4(multiple=True),
+        widget=Select2Ajax(multiple=True),
     )
 
     def __init__(self, group_api_url, *args, **kwargs):
@@ -751,36 +766,12 @@ class MultipleSelectionForm(forms.Form):
         )
 
 
-class AngularLocationSelectWidget(forms.Widget):
-    """
-    Assumptions:
-        mobileWorker.location_id is model
-        scope has searchLocations function to search
-        scope uses availableLocations to search in
-    """
-
-    def __init__(self, require=False, attrs=None):
-        self.require = require
-        super(AngularLocationSelectWidget, self).__init__(attrs)
-
-    def render(self, name, value, attrs=None):
-        # The .format() means I have to use 4 braces to end up with {{$select.selected.name}}
-        return """
-          <ui-select {validator} ng-model="mobileWorker.location_id" theme="select2" style="width: 300px;">
-            <ui-select-match placeholder="Select location...">{{{{$select.selected.name}}}}</ui-select-match>
-            <ui-select-choices refresh="searchLocations($select.search)" refresh-delay="0" repeat="location.id as location in availableLocations | filter:$select.search">
-              <div ng-bind-html="location.name | highlight: $select.search"></div>
-            </ui-select-choices>
-          </ui-select>
-        """.format(validator='validate-location=""' if self.require else '')
-
-
 class PrimaryLocationWidget(forms.Widget):
     """
     Options for this field are dynamically set in JS depending on what options are selected
     for 'assigned_locations'. This works in conjunction with LocationSelectWidget.
     """
-    def __init__(self, css_id, source_css_id, attrs=None, select2_version=None):
+    def __init__(self, css_id, source_css_id, attrs=None):
         """
         args:
             css_id: css_id of primary_location field
@@ -789,21 +780,27 @@ class PrimaryLocationWidget(forms.Widget):
         super(PrimaryLocationWidget, self).__init__(attrs)
         self.css_id = css_id
         self.source_css_id = source_css_id
-
-        versioned_templates = {
-            'v3': 'locations/manage/partials/drilldown_location_widget_v3.html',
-            'v4': 'locations/manage/partials/drilldown_location_widget_v4.html',
-        }
-        if select2_version not in versioned_templates:
-            raise ValueError("select2_version must be in {}".format(", ".join(list(versioned_templates.keys()))))
-        self.template = versioned_templates[select2_version]
+        self.template = 'locations/manage/partials/drilldown_location_widget.html'
 
     def render(self, name, value, attrs=None):
+        initial_data = {}
+        if value:
+            try:
+                loc = SQLLocation.objects.get(location_id=value)
+                initial_data = {
+                    'id': loc.location_id,
+                    'text': loc.get_path_display(),
+                }
+            except SQLLocation.DoesNotExist:
+                pass
+
         return get_template(self.template).render({
             'css_id': self.css_id,
             'source_css_id': self.source_css_id,
             'name': name,
-            'value': value or ''
+            'value': value,
+            'initial_data': initial_data,
+            'attrs': self.build_attrs(self.attrs, attrs),
         })
 
 
@@ -811,6 +808,7 @@ class CommtrackUserForm(forms.Form):
     assigned_locations = forms.CharField(
         label=ugettext_noop("Locations"),
         required=False,
+        widget=forms.SelectMultiple(choices=[]),
     )
     primary_location = forms.CharField(
         label=ugettext_noop("Primary Location"),
@@ -828,12 +826,11 @@ class CommtrackUserForm(forms.Form):
         self.domain = kwargs.pop('domain', None)
         super(CommtrackUserForm, self).__init__(*args, **kwargs)
         self.fields['assigned_locations'].widget = LocationSelectWidget(
-            self.domain, multiselect=True, id='id_assigned_locations', select2_version='v3'
+            self.domain, multiselect=True, id='id_assigned_locations'
         )
         self.fields['primary_location'].widget = PrimaryLocationWidget(
             css_id='id_primary_location',
             source_css_id='id_assigned_locations',
-            select2_version='v3'
         )
         if self.commtrack_enabled:
             programs = Program.by_domain(self.domain, wrap=False)
@@ -894,16 +891,10 @@ class CommtrackUserForm(forms.Form):
                 user.reset_locations(self.domain, location_ids)
 
     def clean_assigned_locations(self):
-        # select2 (< 4.0) doesn't format multiselect for remote data as an array
-        #   but formats it as comma-seperated list, so we need to clean the returned data
         from corehq.apps.locations.models import SQLLocation
         from corehq.apps.locations.util import get_locations_from_ids
 
-        value = self.cleaned_data.get('assigned_locations')
-        if not isinstance(value, six.string_types) or value.strip() == '':
-            return []
-
-        location_ids = [location_id.strip() for location_id in value.split(',')]
+        location_ids = self.data.getlist('assigned_locations')
         try:
             locations = get_locations_from_ids(location_ids, self.domain)
         except SQLLocation.DoesNotExist:
@@ -1101,7 +1092,7 @@ class AddPhoneNumberForm(forms.Form):
             Fieldset(
                 _('Add a Phone Number'),
                 'form_type',
-                twbscrispy.PrependedText('phone_number', '+', type='tel', pattern='\d+')
+                twbscrispy.PrependedText('phone_number', '+', type='tel', pattern=r'\d+')
             ),
             hqcrispy.FormActions(
                 StrictButton(
@@ -1162,7 +1153,7 @@ class CommCareUserFilterForm(forms.Form):
         super(CommCareUserFilterForm, self).__init__(*args, **kwargs)
 
         roles = UserRole.by_domain(self.domain)
-        self.fields['role_id'].choices =  [('', _('All Roles'))] + [
+        self.fields['role_id'].choices = [('', _('All Roles'))] + [
             (role._id, role.name or _('(No Name)')) for role in roles]
 
         self.helper = FormHelper()

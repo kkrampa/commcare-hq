@@ -31,8 +31,7 @@ from corehq.messaging.util import use_phone_entries
 from corehq.toggles import RETRY_SMS_INDEFINITELY, USE_SMS_WITH_INACTIVE_CONTACTS
 from corehq.util.celery_utils import no_result_task
 from corehq.util.timezones.conversions import ServerTime
-from dimagi.utils.couch import CriticalSection, release_lock
-from dimagi.utils.couch.cache.cache_core import get_redis_client
+from dimagi.utils.couch import CriticalSection, get_redis_client, get_redis_lock, release_lock
 from dimagi.utils.rate_limit import rate_limit
 
 
@@ -86,8 +85,12 @@ def delay_processing(msg, minutes):
     msg.save()
 
 
-def get_lock(client, key):
-    return client.lock(key, timeout=settings.SMS_QUEUE_PROCESSING_LOCK_TIMEOUT*60)
+def get_lock(key):
+    return get_redis_lock(
+        key,
+        timeout=settings.SMS_QUEUE_PROCESSING_LOCK_TIMEOUT * 60,
+        name="_".join(key.split("-", 3)[:3]),
+    )
 
 
 def time_within_windows(domain_now, windows):
@@ -161,8 +164,7 @@ def get_connection_slot_lock(phone_number, backend, max_simultaneous_connections
     """
     slot = get_connection_slot_from_phone_number(phone_number, max_simultaneous_connections)
     key = 'backend-%s-connection-slot-%s' % (backend.couch_id, slot)
-    client = get_redis_client()
-    return client.lock(key, timeout=60)
+    return get_redis_lock(key, timeout=60, name="connection_slot")
 
 
 def passes_trial_check(msg):
@@ -281,7 +283,10 @@ class OutboundDailyCounter(object):
 
     @property
     def current_usage(self):
-        return self.client.get(self.key) or 0
+        current_usage = self.client.get(self.key)
+        if isinstance(current_usage, bytes):
+            current_usage = int(current_usage.decode('utf-8'))
+        return current_usage or 0
 
     @property
     def daily_limit(self):
@@ -321,11 +326,10 @@ def process_sms(queued_sms_pk):
     """
     queued_sms_pk - pk of a QueuedSMS entry
     """
-    client = get_redis_client()
     utcnow = get_utcnow()
     # Prevent more than one task from processing this SMS, just in case
     # the message got enqueued twice.
-    message_lock = get_lock(client, "sms-queue-processing-%s" % queued_sms_pk)
+    message_lock = get_lock("sms-queue-processing-%s" % queued_sms_pk)
 
     if message_lock.acquire(blocking=False):
         try:
@@ -362,12 +366,14 @@ def process_sms(queued_sms_pk):
         # of time because timestamps can differ between machines which
         # can cause us to miss sending the message the first time and
         # result in an unnecessary delay.
-        if (isinstance(msg.processed, bool)
-            and not msg.processed
-            and not msg.error
-            and msg.datetime_to_process < (utcnow + timedelta(seconds=10))):
+        if (
+            isinstance(msg.processed, bool) and
+            not msg.processed and
+            not msg.error and
+            msg.datetime_to_process < (utcnow + timedelta(seconds=10))
+        ):
             if recipient_block:
-                recipient_lock = get_lock(client, 
+                recipient_lock = get_lock(
                     "sms-queue-recipient-phone-%s" % msg.phone_number)
                 recipient_lock.acquire(blocking=True)
 
@@ -572,21 +578,6 @@ def publish_sms_change(self, sms):
         publish_sms_saved(sms)
     except Exception as e:
         self.retry(exc=e)
-
-
-@no_result_task(serializer='pickle', queue='background_queue')
-def sync_phone_numbers_for_domain(domain):
-    for user_id in CouchUser.ids_by_domain(domain, is_active=True):
-        _sync_user_phone_numbers(user_id)
-
-    for user_id in CouchUser.ids_by_domain(domain, is_active=False):
-        _sync_user_phone_numbers(user_id)
-
-    case_ids = CaseAccessors(domain).get_case_ids_in_domain()
-    for case in CaseAccessors(domain).iter_cases(case_ids):
-        _sync_case_phone_number(case)
-
-    MigrationStatus.set_migration_completed('phone_sync_domain_%s' % domain)
 
 
 def queued_sms():

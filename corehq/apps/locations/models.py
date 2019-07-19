@@ -6,7 +6,7 @@ from datetime import datetime
 from functools import partial
 import uuid
 
-from bulk_update.helper import bulk_update as bulk_update_helper
+from django_bulk_update.helper import bulk_update as bulk_update_helper
 
 import jsonfield
 from django.db import models, transaction
@@ -204,7 +204,7 @@ class LocationType(models.Model):
             self.domain,
             self.name,
             self.administrative,
-        ).encode('utf-8')
+        )
 
     @property
     @memoized
@@ -425,6 +425,8 @@ class SQLLocation(AdjListModel):
 
         if not self.location_id:
             self.location_id = uuid.uuid4().hex
+            if six.PY2:
+                self.location_id = self.location_id.decode('utf-8')
 
         with transaction.atomic():
             set_site_code_if_needed(self)
@@ -618,7 +620,7 @@ class SQLLocation(AdjListModel):
             self.domain,
             self.name,
             self.location_type.name if hasattr(self, 'location_type') else None,
-        ).encode('utf-8')
+        )
 
     @property
     def display_name(self):
@@ -887,7 +889,7 @@ class LocationRelation(models.Model):
         """
         relations = cls.objects.filter(
             Q(location_a__in=locations) | Q(location_b__in=locations)
-        ).prefetch_related('location_a', 'location_b')
+        )
         location_ids = {loc.location_id for loc in locations}
 
         distance_dictionary = defaultdict(dict)

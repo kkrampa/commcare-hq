@@ -10,14 +10,13 @@ hqDefine("app_manager/js/releases/app_view_release_manager", function () {
         currentAppVersion: initial_page_data('app_version') || -1,
         recipient_contacts: initial_page_data('sms_contacts'),
         download_modal_id: '#download-zip-modal',
-        fetchLimit: initial_page_data('fetch_limit'),
         latestReleasedVersion: initial_page_data('latestReleasedVersion'),
     };
     var el = $('#releases-table');
     if (el.length) {
         var releasesMain = releasesMainModel(o);
-        _.defer(function () { releasesMain.goToPage(1); });
         el.koApplyBindings(releasesMain);
+        _.defer(function () { releasesMain.goToPage(1); });
     }
 
     // View changes / app diff

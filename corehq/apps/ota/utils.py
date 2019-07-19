@@ -1,6 +1,9 @@
 from __future__ import absolute_import
 
 from __future__ import unicode_literals
+
+from functools import wraps
+
 import six
 from couchdbkit import ResourceConflict
 from django.utils.translation import ugettext as _
@@ -40,7 +43,7 @@ def turn_on_demo_mode(commcare_user, domain):
         reset_demo_user_restore(commcare_user, domain)
         return {'errors': []}
     except Exception as e:
-        notify_exception(None, message=e.message)
+        notify_exception(None, message=six.text_type(e))
         return {'errors': [
             _("Something went wrong in creating restore for the user. Please try again or report an issue")
         ]}
@@ -179,6 +182,7 @@ def handle_401_response(f):
     :return json response with apt error_code in app_string and default response in english for missing
     translations and status_code as 406(unacceptable), similar code needed different from 401
     """
+    @wraps(f)
     def _inner(request, domain, *args, **kwargs):
         response = f(request, domain, *args, **kwargs)
         if response.status_code == 401:

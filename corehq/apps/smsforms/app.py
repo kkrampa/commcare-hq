@@ -64,7 +64,7 @@ def start_session(session, domain, contact, app, module, form, case_id=None, yie
         session_data.update(get_cloudcare_session_data(domain, form, contact))
 
     language = contact.get_language_code()
-    config = XFormsConfig(form_content=form.render_xform(),
+    config = XFormsConfig(form_content=form.render_xform().decode('utf-8'),
                           language=language,
                           session_data=session_data,
                           domain=domain,
@@ -116,13 +116,14 @@ def submit_unfinished_form(session):
     """
     # Get and clean the raw xml
     try:
-        xml = get_raw_instance(session.session_id, session.domain)['output']
+        response = get_raw_instance(session.session_id, session.domain)
+        xml = response['output']
     except InvalidSessionIdException:
         return
     root = XML(xml)
-    case_tag_regex = re.compile("^(\{.*\}){0,1}case$") # Use regex in order to search regardless of namespace
-    meta_tag_regex = re.compile("^(\{.*\}){0,1}meta$")
-    timeEnd_tag_regex = re.compile("^(\{.*\}){0,1}timeEnd$")
+    case_tag_regex = re.compile(r"^(\{.*\}){0,1}case$") # Use regex in order to search regardless of namespace
+    meta_tag_regex = re.compile(r"^(\{.*\}){0,1}meta$")
+    timeEnd_tag_regex = re.compile(r"^(\{.*\}){0,1}timeEnd$")
     current_timstamp = json_format_datetime(utcnow())
     for child in root:
         if case_tag_regex.match(child.tag) is not None:

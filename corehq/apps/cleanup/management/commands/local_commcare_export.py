@@ -15,10 +15,8 @@ from tastypie.bundle import Bundle
 
 from corehq.apps.api.es import ElasticAPIQuerySet, CaseES, es_search_by_params, XFormES
 from corehq.apps.api.models import ESCase, ESXFormInstance
-from corehq.apps.api.resources.v0_3 import CaseListFilters
 from corehq.apps.api.resources.v0_4 import CommCareCaseResource, XFormInstanceResource
 from corehq.apps.api.serializers import CommCareCaseSerializer, XFormInstanceSerializer
-from corehq.apps.cloudcare.api import ElasticCaseQuery
 from corehq.elastic import ESError
 
 
@@ -30,15 +28,9 @@ class MockApi(namedtuple('MockApi', 'query_set resource serializer')):
 
 def _get_case_mock(project, params):
     # this is mostly copy/paste/modified from CommCareCaseResource
-    filters = CaseListFilters(params).filters
-    query = ElasticCaseQuery(project, filters).get_query()
-    if 'from' in query:
-        del query['from']
-    if 'size' in query:
-        del query['size']
-
+    es_query = es_search_by_params(params, project)
     query_set = ElasticAPIQuerySet(
-        payload=query,
+        payload=es_query,
         model=ESCase,
         es_client=CaseES(project),
     ).order_by('server_modified_on')
@@ -109,7 +101,7 @@ class LocalCommCareHqClient(object):
         def _inner(es_query_set, start, params):
             from commcare_export.cli import logger
             logger.info("Fetching batch: {}-{}".format(start, start + self.limit))
-            return es_query_set[start:start + self.limit]
+            return list(es_query_set[start:start + self.limit])
 
         return _inner(es_query_set, start, params)
 
@@ -149,7 +141,7 @@ class LocalCommCareHqClient(object):
                     else:
                         more_to_fetch = False
 
-                self.checkpoint(paginator, batch_list)
+                    self.checkpoint(paginator, batch_list)
 
         from commcare_export.repeatable_iterator import RepeatableIterator
         return RepeatableIterator(iterate_resource)

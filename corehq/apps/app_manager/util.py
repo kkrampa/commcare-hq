@@ -7,9 +7,8 @@ import uuid
 import re
 import logging
 import yaml
-import six
-from collections import namedtuple, OrderedDict
-from copy import deepcopy, copy
+from collections import OrderedDict, namedtuple
+from copy import deepcopy
 from io import open
 
 
@@ -31,6 +30,7 @@ from corehq.apps.app_manager.exceptions import SuiteError, SuiteValidationError,
 from corehq.apps.app_manager.xpath import UserCaseXPath
 from corehq.apps.builds.models import CommCareBuildConfig
 from corehq.apps.app_manager.tasks import create_user_cases
+from corehq.apps.locations.models import SQLLocation
 from corehq.util.soft_assert import soft_assert
 from corehq.apps.domain.models import Domain
 from corehq.apps.app_manager.const import (
@@ -39,11 +39,11 @@ from corehq.apps.app_manager.const import (
     USERCASE_ID,
     USERCASE_PREFIX,
 )
-from corehq.apps.app_manager.xform import XForm, XFormException, parse_xml
+from corehq.apps.app_manager.exceptions import XFormException
+from corehq.apps.app_manager.xform import XForm, parse_xml
 from corehq.apps.users.models import CommCareUser
 from corehq.util.quickcache import quickcache
 from dimagi.utils.couch import CriticalSection
-from dimagi.utils.make_uuid import random_hex
 
 
 logger = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ def app_doc_types():
 def _prepare_xpath_for_validation(xpath):
     prepared_xpath = xpath.lower()
     prepared_xpath = prepared_xpath.replace('"', "'")
-    prepared_xpath = re.compile('\s').sub('', prepared_xpath)
+    prepared_xpath = re.compile(r'\s').sub('', prepared_xpath)
     return prepared_xpath
 
 
@@ -394,14 +394,14 @@ def get_cloudcare_session_data(domain_name, form, couch_user):
     return session_data
 
 
-def update_form_unique_ids(app_source, id_map=None):
+def update_form_unique_ids(app_source, form_ids_by_xmlns=None):
     from corehq.apps.app_manager.models import form_id_references, jsonpath_update
 
     app_source = deepcopy(app_source)
 
-    def change_form_unique_id(form, map):
+    def change_form_unique_id(form, ids_by_xmlns):
         unique_id = form['unique_id']
-        new_unique_id = map.get(form['xmlns'], random_hex())
+        new_unique_id = ids_by_xmlns.get(form['xmlns'], uuid.uuid4().hex)
         form['unique_id'] = new_unique_id
         if ("%s.xml" % unique_id) in app_source['_attachments']:
             app_source['_attachments']["%s.xml" % new_unique_id] = app_source['_attachments'].pop("%s.xml" % unique_id)
@@ -413,12 +413,12 @@ def update_form_unique_ids(app_source, id_map=None):
         del app_source['user_registration']
 
     id_changes = {}
-    if id_map is None:
-        id_map = {}
+    if form_ids_by_xmlns is None:
+        form_ids_by_xmlns = {}
     for m, module in enumerate(app_source['modules']):
         for f, form in enumerate(module['forms']):
             old_id = form['unique_id']
-            new_id = change_form_unique_id(app_source['modules'][m]['forms'][f], id_map)
+            new_id = change_form_unique_id(app_source['modules'][m]['forms'][f], form_ids_by_xmlns)
             id_changes[old_id] = new_id
 
     for reference_path in form_id_references:
@@ -450,7 +450,7 @@ def _app_callout_templates():
     )
     if os.path.exists(path):
         with open(path, encoding='utf-8') as f:
-            data = yaml.load(f)
+            data = yaml.safe_load(f)
     else:
         logger.info("not found: %s", path)
         data = []
@@ -505,60 +505,6 @@ def get_sort_and_sort_only_columns(detail, sort_elements):
         for field, (element, element_order) in sort_elements.items()
     ]
     return sort_only_elements, sort_columns
-
-
-def get_form_data(domain, app, include_shadow_forms=True):
-    from corehq.apps.reports.formdetails.readable import FormQuestionResponse
-    from corehq.apps.app_manager.models import ShadowForm
-
-    modules = []
-    errors = []
-    for module in app.get_modules():
-        forms = []
-        module_meta = {
-            'id': module.unique_id,
-            'name': module.name,
-            'short_comment': module.short_comment,
-            'module_type': module.module_type,
-            'is_surveys': module.is_surveys,
-            'module_filter': module.module_filter,
-        }
-
-        form_list = module.get_forms()
-        if not include_shadow_forms:
-            form_list = [f for f in form_list if not isinstance(f, ShadowForm)]
-        for form in form_list:
-            form_meta = {
-                'id': form.unique_id,
-                'name': form.name,
-                'short_comment': form.short_comment,
-                'action_type': form.get_action_type(),
-                'form_filter': form.form_filter,
-            }
-            try:
-                questions = form.get_questions(
-                    app.langs,
-                    include_triggers=True,
-                    include_groups=True,
-                    include_translations=True
-                )
-                form_meta['questions'] = [FormQuestionResponse(q).to_json() for q in questions]
-            except XFormException as e:
-                form_meta['error'] = {
-                    'details': six.text_type(e),
-                    'edit_url': reverse(
-                        'form_source',
-                        args=[domain, app._id, form.unique_id]
-                    ),
-                }
-                form_meta['module'] = copy(module_meta)
-                errors.append(form_meta)
-            else:
-                forms.append(form_meta)
-
-        module_meta['forms'] = forms
-        modules.append(module_meta)
-    return modules, errors
 
 
 def get_and_assert_practice_user_in_domain(practice_user_id, domain):
@@ -685,26 +631,60 @@ def get_form_source_download_url(xform):
 def get_latest_enabled_build_for_profile(domain, profile_id):
     from corehq.apps.app_manager.models import LatestEnabledBuildProfiles
     latest_enabled_build = (LatestEnabledBuildProfiles.objects.
-                            filter(build_profile_id=profile_id)
+                            filter(build_profile_id=profile_id, active=True)
                             .order_by('-version')
                             .first())
     if latest_enabled_build:
         return get_app(domain, latest_enabled_build.build_id)
 
 
-@quickcache(['build_id', 'version'], timeout=24 * 60 * 60)
-def get_enabled_build_profiles_for_version(build_id, version):
-    from corehq.apps.app_manager.models import LatestEnabledBuildProfiles
-    return list(LatestEnabledBuildProfiles.objects.filter(
-        build_id=build_id, version=version).values_list('build_profile_id', flat=True))
+@quickcache(['domain', 'location_id', 'app_id'], timeout=24 * 60 * 60)
+def get_latest_app_release_by_location(domain, location_id, app_id):
+    """
+    for a location search for enabled app releases for all parent locations.
+    Child location's setting takes precedence over parent
+    """
+    from corehq.apps.app_manager.models import AppReleaseByLocation
+    location = SQLLocation.active_objects.get(location_id=location_id)
+    location_and_ancestor_ids = location.get_ancestors(include_self=True).values_list(
+        'location_id', flat=True).reverse()
+    # get all active enabled releases and order by version desc to get one with the highest version in the end
+    # for a location. Do not use the first object itself in order to respect the location hierarchy and use
+    # the closest location to determine the valid active release
+    latest_enabled_releases = {
+        release.location_id: release.build_id
+        for release in
+        AppReleaseByLocation.objects.filter(
+            location_id__in=location_and_ancestor_ids, app_id=app_id, domain=domain, active=True).order_by(
+            'version')
+    }
+    for loc_id in location_and_ancestor_ids:
+        build_id = latest_enabled_releases.get(loc_id)
+        if build_id:
+            return get_app(domain, build_id)
 
 
+def expire_get_latest_app_release_by_location_cache(app_release_by_location):
+    """
+    expire cache for the location and its descendants for the app corresponding to this enabled app release
+    why? : Latest enabled release for a location is dependent on restrictions added for
+    itself and its ancestors. Hence we expire the cache for location and its descendants for which the
+    latest enabled release would depend on this location
+    """
+    location = SQLLocation.active_objects.get(location_id=app_release_by_location.location_id)
+    location_and_descendants = location.get_descendants(include_self=True)
+    for loc in location_and_descendants:
+        get_latest_app_release_by_location.clear(app_release_by_location.domain, loc.location_id,
+                                          app_release_by_location.app_id)
+
+
+@quickcache(['app_id'], timeout=24 * 60 * 60)
 def get_latest_enabled_versions_per_profile(app_id):
     from corehq.apps.app_manager.models import LatestEnabledBuildProfiles
     # a dict with each profile id mapped to its latest enabled version number, if present
     return {
         build_profile['build_profile_id']: build_profile['version__max']
         for build_profile in
-        LatestEnabledBuildProfiles.objects.filter(app_id=app_id).values('build_profile_id').annotate(
+        LatestEnabledBuildProfiles.objects.filter(app_id=app_id, active=True).values('build_profile_id').annotate(
             Max('version'))
     }

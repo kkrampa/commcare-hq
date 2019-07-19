@@ -12,6 +12,7 @@ from corehq.apps.es import users as user_es, filters
 from corehq.apps.domain.models import Domain
 from corehq.apps.groups.models import Group
 from corehq.apps.locations.permissions import user_can_access_other_user
+from corehq.apps.userreports.reports.filters.values import CHOICE_DELIMITER
 from corehq.apps.users.cases import get_wrapped_owner
 from corehq.apps.users.models import CommCareUser, WebUser
 from corehq.apps.commtrack.models import SQLLocation
@@ -275,7 +276,9 @@ class ExpandedMobileWorkerFilter(BaseMultipleOptionFilter):
     @property
     @memoized
     def selected(self):
-        selected_ids = self.request.GET.getlist(self.slug)
+        selected_ids = []
+        for ids in self.request.GET.getlist(self.slug):
+            selected_ids.extend(ids.split(CHOICE_DELIMITER))
         if not selected_ids:
             return [{'id': url_id, 'text': text}
                     for url_id, text in self.get_default_selections()]
@@ -334,7 +337,7 @@ class ExpandedMobileWorkerFilter(BaseMultipleOptionFilter):
         # The queryset returned by this method is location-safe
         q = user_es.UserES().domain(domain)
         if ExpandedMobileWorkerFilter.no_filters_selected(mobile_user_and_group_slugs):
-            return q
+            return q.show_inactive()
 
         user_ids = cls.selected_user_ids(mobile_user_and_group_slugs)
         user_types = cls.selected_user_types(mobile_user_and_group_slugs)

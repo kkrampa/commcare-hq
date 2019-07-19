@@ -1,4 +1,3 @@
-/*globals $, hqImport, _, ko, django */
 hqDefine("app_manager/js/modules/module_view", function () {
     $(function () {
         var initial_page_data = hqImport('hqwebapp/js/initial_page_data').get,
@@ -87,6 +86,23 @@ hqDefine("app_manager/js/modules/module_view", function () {
             $('#case_type_form_group').removeClass('has-error');
         };
 
+        var $nameEnumContainer = $('#name-enum-mapping');
+        if ($nameEnumContainer.length) {
+            var nameMapping = hqImport('hqwebapp/js/ui-element').key_value_mapping({
+                lang: moduleBrief.lang,
+                langs: moduleBrief.langs,
+                items: moduleBrief.name_enum,
+                property_name: 'name',
+                values_are_icons: false,
+                keys_are_conditions: true,
+            });
+            nameMapping.on("change", function () {
+                $nameEnumContainer.find("[name='name_enum']").val(JSON.stringify(this.getItems()));
+                $nameEnumContainer.find("[name='name_enum']").trigger('change');    // trigger save button
+            });
+            $nameEnumContainer.append(nameMapping.ui);
+        }
+
         $('#case_type').on('textchange', function () {
             var $el = $(this),
                 value = $el.val(),
@@ -144,8 +160,8 @@ hqDefine("app_manager/js/modules/module_view", function () {
                 self.caseListForm = ko.observable(originalFormId);
                 self.postFormWorkflow = ko.observable(postFormWorkflow);
                 self.endOfRegistrationOptions = [
-                    {value: 'case_list', label: gettext('Go back to case list')},
-                    {value: 'default', label: gettext('Proceed with registered case')},
+                    {id: 'case_list', text: gettext('Go back to case list')},
+                    {id: 'default', text: gettext('Proceed with registered case')},
                 ];
 
                 self.formMissing = ko.computed(function () {

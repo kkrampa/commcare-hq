@@ -2,7 +2,8 @@ hqDefine("sms/js/settings", [
     'jquery',
     'knockout',
     'hqwebapp/js/initial_page_data',
-    'hqwebapp/js/select2_handler_v3',
+    'hqwebapp/js/select2_handler',
+    'hqwebapp/js/components.ko',    // select toggle widget
 ], function(
     $,
     ko,

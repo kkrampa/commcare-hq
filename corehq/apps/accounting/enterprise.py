@@ -11,10 +11,11 @@ from dimagi.utils.dates import DateSpan
 
 from couchforms.analytics import get_last_form_submission_received
 from corehq.apps.accounting.exceptions import EnterpriseReportError
-from corehq.apps.accounting.models import BillingAccount, DefaultProductPlan, Subscription
+from corehq.apps.accounting.models import BillingAccount, Subscription
 from corehq.apps.accounting.utils import get_default_domain_url
 from corehq.apps.app_manager.dbaccessors import get_brief_apps_in_domain
 from corehq.apps.domain.models import Domain
+from corehq.apps.domain.calculations import sms_in_in_last
 from corehq.apps.es import forms as form_es
 from corehq.apps.reports.filters.users import ExpandedMobileWorkerFilter as EMWF
 from corehq.apps.users.dbaccessors.all_commcare_users import (
@@ -110,8 +111,8 @@ class EnterpriseDomainReport(EnterpriseReport):
     @property
     def headers(self):
         headers = super(EnterpriseDomainReport, self).headers
-        return [_('Created On [UTC]'), _('# of Apps'), _('# of Mobile Users'),
-                _('# of Web Users'), _('Last Form Submission [UTC]')] + headers
+        return [_('Created On [UTC]'), _('# of Apps'), _('# of Mobile Users'), _('# of Web Users'),
+                _('# of SMS (last 30 days)'), _('Last Form Submission [UTC]')] + headers
 
     def rows_for_domain(self, domain_obj):
         return [[
@@ -119,6 +120,7 @@ class EnterpriseDomainReport(EnterpriseReport):
             len(domain_obj.applications()),
             get_mobile_user_count(domain_obj.name, include_inactive=False),
             get_web_user_count(domain_obj.name, include_inactive=False),
+            sms_in_in_last(domain_obj.name, 30),
             self.format_date(get_last_form_submission_received(domain_obj.name)),
         ] + self.domain_properties(domain_obj)]
 
@@ -135,19 +137,27 @@ class EnterpriseWebUserReport(EnterpriseReport):
     @property
     def headers(self):
         headers = super(EnterpriseWebUserReport, self).headers
-        return [_('Name'), _('Email Address'), _('Role'), _('Last Login [UTC]')] + headers
+        return [_('Name'), _('Email Address'), _('Role'), _('Last Login [UTC]'),
+                _('Last Access Date [UTC]')] + headers
 
     def rows_for_domain(self, domain_obj):
         rows = []
         for user in get_all_user_rows(domain_obj.name, include_web_users=True, include_mobile_users=False,
                                       include_inactive=False, include_docs=True):
             user = CouchUser.wrap_correctly(user['doc'])
-            rows.append([
-                user.full_name,
-                user.username,
-                user.role_label(domain_obj.name),
-                self.format_date(user.last_login),
-            ] + self.domain_properties(domain_obj))
+            domain_membership = user.get_domain_membership(domain_obj.name)
+            last_accessed_domain = None
+            if domain_membership:
+                last_accessed_domain = domain_membership.last_accessed
+            rows.append(
+                [
+                    user.full_name,
+                    user.username,
+                    user.role_label(domain_obj.name),
+                    self.format_date(user.last_login),
+                    last_accessed_domain
+                ]
+                + self.domain_properties(domain_obj))
         return rows
 
     def total_for_domain(self, domain_obj):

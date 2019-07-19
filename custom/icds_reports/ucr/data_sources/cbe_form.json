@@ -1,7 +1,15 @@
 {
   "domains": [
     "icds-dashboard-qa",
+    "laurence-project-1",
+    "jessica-icds-cas",
+    "marissa-test",
+    "derek-icds-sandbox",
+    "priyanka-app",
+    "shrena-dev",
+    "aparatest",
     "reach-sandbox",
+    "reach-dashboard-qa",
     "reach-test",
     "icds-sql",
     "icds-test",
@@ -10,9 +18,19 @@
     "icds-cas-sandbox"
   ],
   "server_environment": [
-    "softlayer",
+    "india",
     "icds-new",
     "icds"
+  ],
+  "mirrored_engine_ids": [
+    {
+      "server_environment": "icds",
+      "engine_ids": ["icds-ucr-citus"]
+    },
+    {
+      "server_environment": "india",
+      "engine_ids": ["icds-ucr-citus"]
+    }
   ],
   "config": {
     "table_id": "static-cbe_form",
@@ -32,6 +50,24 @@
         "http://openrosa.org/formdesigner/61238C23-7059-446D-8A9C-34107642CBB2"
       ]
     },
+    "validations": [
+      {
+        "name": "submitted_by_aww",
+        "error_message": "Form not submitted by AWW",
+        "expression": {
+          "type": "boolean_expression",
+          "operator": "eq",
+          "expression": {
+            "location_id_expression": {
+              "type": "named",
+              "name": "user_location_id"
+            },
+            "type": "location_type_name"
+          },
+          "property_value": "awc"
+        }
+      }
+    ],
     "configured_indicators": [
       {
         "display_name": "AWC ID",
@@ -46,6 +82,24 @@
           "type": "named",
           "name": "user_location_id"
         }
+      },
+      {
+        "display_name": "Supervisor ID",
+        "datatype": "string",
+        "expression": {
+          "type": "ancestor_location",
+          "location_id": {
+            "type": "named",
+            "name": "user_location_id"
+          },
+          "location_type": "supervisor",
+          "location_property": "_id"
+        },
+        "is_primary_key": false,
+        "transform": {},
+        "is_nullable": true,
+        "type": "expression",
+        "column_id": "supervisor_id"
       },
       {
         "display_name": "State ID",

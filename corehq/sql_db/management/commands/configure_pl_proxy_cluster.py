@@ -11,7 +11,7 @@ from corehq.form_processor.utils.sql import fetchall_as_namedtuple
 from corehq.sql_db.config import partition_config, parse_existing_shard, get_shards_to_update
 from six.moves import input
 
-SHARD_OPTION_RX = re.compile('^p[\d+]')
+SHARD_OPTION_RX = re.compile(r'^p[\d+]')
 
 SERVER_TEMPLATE = """
     CREATE SERVER {server_name} FOREIGN DATA WRAPPER plproxy
@@ -43,6 +43,12 @@ class Command(BaseCommand):
             dest='verbose',
             default=False,
         )
+        parser.add_argument(
+            '--create_only',
+            action='store_true',
+            dest='create_only',
+            default=False,
+        )
 
     def handle(self, **options):
         if not settings.USE_PARTITIONED_DATABASE:
@@ -51,6 +57,8 @@ class Command(BaseCommand):
         verbose = options['verbose']
         existing_config = _get_existing_cluster_config(settings.PL_PROXY_CLUSTER_NAME)
         if existing_config:
+            if options['create_only']:
+                return
             if _confirm("Cluster configuration already exists. Are you sure you want to change it?"):
                 _update_pl_proxy_cluster(existing_config, verbose)
         else:

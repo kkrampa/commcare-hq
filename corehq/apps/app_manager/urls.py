@@ -12,6 +12,7 @@ from corehq.apps.app_manager.views import (
     DownloadFormSummaryView,
     DownloadAppSummaryView,
     FormHasSubmissionsView,
+    FormSummaryDiffView,
     PromptSettingsUpdateView,
     view_app,
     multimedia_ajax, current_app_version, paginate_releases,
@@ -29,10 +30,11 @@ from corehq.apps.app_manager.views import (
     direct_ccz, download_index, download_file, get_form_questions, pull_master_app, edit_add_ons,
     update_linked_whitelist, overwrite_module_case_list, app_settings, toggle_build_profile,
 )
+from corehq.apps.app_manager.views.apps import move_child_modules_after_parents
 from corehq.apps.app_manager.views.modules import ExistingCaseTypesView
 from corehq.apps.translations.views import (
-    download_bulk_ui_translations, download_bulk_app_translations, upload_bulk_ui_translations,
-    upload_bulk_app_translations
+    download_bulk_ui_translations, upload_bulk_ui_translations,
+    download_bulk_app_translations, upload_bulk_app_translations,
 )
 from corehq.apps.hqmedia.urls import application_urls as hqmedia_urls
 from corehq.apps.hqmedia.urls import download_urls as media_download_urls
@@ -92,6 +94,8 @@ urlpatterns = [
     url(r'^app_from_template/(?P<slug>[\w-]+)/$', app_from_template, name='app_from_template'),
     url(r'^copy_app/$', copy_app, name='copy_app'),
     url(r'^view/(?P<app_id>[\w-]+)/', include(app_urls)),
+    url(r'^compare/(?P<first_app_id>[\w-]+)..(?P<second_app_id>[\w-]+)',
+        FormSummaryDiffView.as_view(), name=FormSummaryDiffView.urlname),
     url(r'^schema/form/(?P<form_unique_id>[\w-]+)/$',
         get_form_data_schema, name='get_form_data_schema'),
     url(r'^new_module/(?P<app_id>[\w-]+)/$', new_module, name='new_module'),
@@ -166,6 +170,8 @@ urlpatterns = [
         name='edit_app_ui_translations'),
     url(r'^get_app_ui_translations/$', get_app_ui_translations, name='get_app_ui_translations'),
     url(r'^rearrange/(?P<app_id>[\w-]+)/(?P<key>[\w-]+)/$', rearrange, name='rearrange'),
+    url(r'^move_child_modules_after_parents/(?P<app_id>[\w-]+)/$', move_child_modules_after_parents,
+        name='move_child_modules_after_parents'),
 
     url(r'^odk/(?P<app_id>[\w-]+)/qr_code/$', odk_qr_code, name='odk_qr_code'),
     url(r'^odk/(?P<app_id>[\w-]+)/media_qr_code/$', odk_media_qr_code, name='odk_media_qr_code'),

@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import unicode_literals
 import re
 
+import six
 from crispy_forms.layout import Submit
 from django import forms
 from django.db.models import Q
@@ -14,7 +15,7 @@ from crispy_forms.helper import FormHelper
 from crispy_forms import layout as crispy
 from crispy_forms.bootstrap import StrictButton
 
-from corehq.apps.hqwebapp.widgets import Select2AjaxV4
+from corehq.apps.hqwebapp.widgets import Select2Ajax
 from dimagi.utils.couch.database import iter_docs
 from memoized import memoized
 
@@ -38,8 +39,7 @@ from six.moves import filter
 
 
 class LocationSelectWidget(forms.Widget):
-    def __init__(self, domain, attrs=None, id='supply-point', multiselect=False, query_url=None,
-                 select2_version=None):
+    def __init__(self, domain, attrs=None, id='supply-point', multiselect=False, query_url=None):
         super(LocationSelectWidget, self).__init__(attrs)
         self.domain = domain
         self.id = id
@@ -48,33 +48,29 @@ class LocationSelectWidget(forms.Widget):
             self.query_url = query_url
         else:
             self.query_url = reverse('child_locations_for_select2', args=[self.domain])
-        self.select2_version = select2_version
-
-        versioned_templates = {
-            'v3': 'locations/manage/partials/autocomplete_select_widget_v3.html',
-            'v4': 'locations/manage/partials/autocomplete_select_widget_v4.html',
-        }
-        if select2_version not in versioned_templates:
-            raise ValueError("select2_version must be in {}".format(", ".join(list(versioned_templates.keys()))))
-        self.template = versioned_templates[select2_version]
+        self.template = 'locations/manage/partials/autocomplete_select_widget.html'
 
     def render(self, name, value, attrs=None, renderer=None):
-        location_ids = value.split(',') if value else []
+        location_ids = to_list(value) if value else []
         locations = list(SQLLocation.active_objects
                          .filter(domain=self.domain, location_id__in=location_ids))
-        initial_data = [{'id': loc.location_id, 'name': loc.get_path_display()} for loc in locations]
+        initial_data = [{
+            'id': loc.location_id,
+            'text': loc.get_path_display(),
+        } for loc in locations]
 
         return get_template(self.template).render({
             'id': self.id,
             'name': name,
-            'value': ','.join(loc.location_id for loc in locations),
+            'value': [loc.location_id for loc in locations],
             'query_url': self.query_url,
             'multiselect': self.multiselect,
             'initial_data': initial_data,
+            'attrs': self.build_attrs(self.attrs, attrs),
         })
 
     def value_from_datadict(self, data, files, name):
-        if self.multiselect and self.select2_version == 'v4':
+        if self.multiselect:
             return data.getlist(name)
         return super(LocationSelectWidget, self).value_from_datadict(data, files, name)
 
@@ -87,6 +83,7 @@ class ParentLocWidget(forms.Widget):
         ).render({
             'name': name,
             'value': value,
+            'attrs': self.build_attrs(self.attrs, attrs),
         })
 
 
@@ -98,6 +95,7 @@ class LocTypeWidget(forms.Widget):
         ).render({
             'name': name,
             'value': value,
+            'attrs': self.build_attrs(self.attrs, attrs),
         })
 
 
@@ -249,7 +247,7 @@ class LocationForm(forms.Form):
 
         if site_code:
             site_code = site_code.lower()
-            slug_regex = re.compile('^[-_\w\d]+$')
+            slug_regex = re.compile(r'^[-_\w\d]+$')
             if not slug_regex.match(site_code):
                 raise forms.ValidationError(_(
                     'The site code cannot contain spaces or special characters.'
@@ -436,6 +434,14 @@ class LocationFormSet(object):
     def is_valid(self):
         return all(form.is_valid() for form in self.forms)
 
+    @property
+    @memoized
+    def errors(self):
+        errors = {}
+        for form in self.forms:
+            errors.update(form.errors)
+        return errors
+
     def save(self):
         if not self.is_valid():
             raise ValueError('Form is not valid')
@@ -457,7 +463,7 @@ class LocationFormSet(object):
         user_data = (self.custom_user_data.get_data_to_save()
                      if self.custom_user_data.is_valid() else {})
         username = self.user_form.cleaned_data.get('username', "")
-        password = self.user_form.cleaned_data.get('password', "")
+        password = self.user_form.cleaned_data.get('new_password', "")
         first_name = self.user_form.cleaned_data.get('first_name', "")
         last_name = self.user_form.cleaned_data.get('last_name', "")
 
@@ -505,11 +511,11 @@ class LocationFormSet(object):
         if domain_obj.strong_mobile_passwords:
             initial_password = generate_strong_password()
             pw_field = crispy.Field(
-                'password',
+                'new_password',
                 value=initial_password,
             )
         else:
-            pw_field = 'password'
+            pw_field = 'new_password'
 
         form.fields['username'].help_text = None
         form.fields['location_id'].required = False  # This field isn't displayed
@@ -543,7 +549,7 @@ class UsersAtLocationForm(forms.Form):
     selected_ids = forms.Field(
         label=ugettext_lazy("Workers at Location"),
         required=False,
-        widget=Select2AjaxV4(multiple=True),
+        widget=Select2Ajax(multiple=True),
     )
 
     def __init__(self, domain_object, location, *args, **kwargs):
@@ -657,11 +663,11 @@ class RelatedLocationForm(forms.Form):
     def __init__(self, domain, location, *args, **kwargs):
         self.location = location
         self.related_location_ids = LocationRelation.from_locations([self.location])
-        kwargs['initial'] = {'related_locations': ','.join(self.related_location_ids)}
+        kwargs['initial'] = {'related_locations': self.related_location_ids}
         super(RelatedLocationForm, self).__init__(*args, **kwargs)
 
         self.fields['related_locations'].widget = LocationSelectWidget(
-            domain, id='id_related_locations', multiselect=True, select2_version='v4'
+            domain, id='id_related_locations', multiselect=True
         )
 
         locations = (
@@ -720,3 +726,19 @@ class RelatedLocationForm(forms.Form):
                 if name.startswith('relation_distance_')
             }
         )
+
+
+def to_list(value):
+    """
+    Returns ``value`` as a list if it is iterable and not a string,
+    otherwise returns ``value`` in a list.
+
+    >>> to_list(('foo', 'bar', 'baz')) == ['foo', 'bar', 'baz']
+    True
+    >>> to_list('foo bar baz') == ['foo bar baz']
+    True
+
+    """
+    if hasattr(value, '__iter__') and not isinstance(value, six.string_types):
+        return list(value)
+    return [value]
